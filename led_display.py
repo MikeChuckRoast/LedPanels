@@ -30,7 +30,9 @@ MESSAGE = "Test Meet"
 # Font path: for real hardware the repo uses BDF fonts in `fonts/`.
 # For PIL fallback, use a TTF path if available on your system; if BDF is given
 # and PIL can't load it, the script will fall back to a default bitmap font.
-FONT_PATH = "fonts/9x18B.bdf"
+#FONT_PATH = "/home/mike/u8g2/tools/font/bdf/helvB12.bdf"
+FONT_PATH = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf/helvB12.bdf"
+FONT_SHIFT = 7
 
 # Run continuously when True (update time every second). Default is False -> single frame.
 LOOP = True
@@ -107,7 +109,7 @@ def draw_with_rgbmatrix(message, font_path, width, height, once=True, chain=2, p
         x_top = max(0, (canvas_width - text_width) // 2)
 
         # For rgbmatrix, DrawText expects baseline y; approximate center in top half
-        y_top = (top_h + font.height) // 2 - 4
+        y_top = (top_h + font.height) // 2 - FONT_SHIFT
         graphics.DrawText(canvas, font, x_top, y_top, white, message)
 
         # Bottom time
@@ -115,7 +117,7 @@ def draw_with_rgbmatrix(message, font_path, width, height, once=True, chain=2, p
         time_width = sum(font.CharacterWidth(ord(c)) for c in now)
         x_bot = max(0, (canvas_width - time_width) // 2)
         # Baseline for bottom: offset by top_h
-        y_bot = top_h + (bottom_h + font.height) // 2 - 4
+        y_bot = top_h + (bottom_h + font.height) // 2 - FONT_SHIFT
         graphics.DrawText(canvas, font, x_bot, y_bot, white, now)
 
         # Push to matrix
@@ -229,7 +231,7 @@ def main():
     parser.add_argument('--no-loop', dest='loop', action='store_false', help="Don't loop; render a single frame")
     parser.set_defaults(loop=LOOP)
     parser.add_argument('--out', default='output.png', help='Output filename for PIL fallback')
-    parser.add_argument('--chain', type=int, default=1, help='Number of panels chained horizontally (chain_length)')
+    parser.add_argument('--chain', type=int, default=2, help='Number of panels chained horizontally (chain_length)')
     parser.add_argument('--parallel', type=int, default=1, help='Number of panels stacked vertically (parallel)')
     parser.add_argument('--gpio-slowdown', type=int, default=3, help='gpio_slowdown for RGBMatrixOptions (optional)')
     args = parser.parse_args()
