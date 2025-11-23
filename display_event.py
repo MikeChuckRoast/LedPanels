@@ -232,7 +232,8 @@ def paginate_items(items: List[Dict], page_size: int):
 def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int, height: int,
                          line_height: int = DEFAULT_LINE_HEIGHT, interval: float = DEFAULT_INTERVAL,
                          chain: int = 2, parallel: int = 1, gpio_slowdown: int = 3, once: bool = False,
-                         affiliation_colors: Optional[Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int]]]] = None):
+                         affiliation_colors: Optional[Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int]]]] = None,
+                         header_rows: int = 1):
     """Render the given event repeatedly (paging) onto the RGB matrix.
 
     `matrix_classes` is the tuple returned by `try_import_rgbmatrix()`.
@@ -255,11 +256,11 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
     canvas_width = canvas.width
     canvas_height = canvas.height
 
-    # Calculate how many athlete lines fit per page: total lines minus 1 for header
+    # Calculate how many athlete lines fit per page: total lines minus header_rows
     total_lines = canvas_height // line_height
-    athlete_lines_per_page = max(0, total_lines - 1)
+    athlete_lines_per_page = max(0, total_lines - header_rows)
     if athlete_lines_per_page <= 0:
-        raise RuntimeError("Display height too small for required line height")
+        raise RuntimeError("Display height too small for required line height and header rows")
 
     # Prepare text elements
     header = event.get("name", "")
@@ -319,31 +320,49 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
         page = athlete_pages[page_index]
         canvas.Clear()
 
-        # Draw header background (white) for the first line_height rows
-        for y in range(0, line_height):
+        # Draw header background (white) for the header_rows
+        header_height = header_rows * line_height
+        for y in range(0, header_height):
             graphics.DrawLine(canvas, 0, y, canvas_width - 1, y, white)
 
-        # Header text: black on white. Truncate if needed, then center
-        header_text = header
+        # Wrap header text into multiple lines if needed
         available_header_width = canvas_width - 2  # Leave 1px margin on each side
-        header_text_width = get_text_width(header_text)
-        
-        # Truncate header if it's too wide
-        if header_text_width > available_header_width:
-            while header_text and get_text_width(header_text) > available_header_width:
-                header_text = header_text[:-1]
-            header_text_width = get_text_width(header_text)
-        
-        # Center the (possibly truncated) header
-        x_header = max(1, (canvas_width - header_text_width) // 2)
-        # Baseline y for header
-        y_header = (line_height + font.height) // 2 - FONT_SHIFT
-        graphics.DrawText(canvas, font, x_header, y_header, black, header_text)
+        words = header.split()
+        header_lines = []
+        current_line = ""
+
+        for word in words:
+            test_line = (current_line + " " + word).strip()
+            if get_text_width(test_line) <= available_header_width:
+                current_line = test_line
+            else:
+                if current_line:
+                    header_lines.append(current_line)
+                current_line = word
+
+        if current_line:
+            header_lines.append(current_line)
+
+        # Truncate to header_rows if we have too many lines
+        if len(header_lines) > header_rows:
+            header_lines = header_lines[:header_rows]
+            # Truncate last line if needed
+            last_line = header_lines[-1]
+            while last_line and get_text_width(last_line) > available_header_width:
+                last_line = last_line[:-1]
+            header_lines[-1] = last_line
+
+        # Draw each header line, centered within its row
+        for line_idx, line_text in enumerate(header_lines):
+            line_width = get_text_width(line_text)
+            x_pos = max(1, (canvas_width - line_width) // 2)
+            y_pos = (line_idx * line_height) + (line_height + font.height) // 2 - FONT_SHIFT
+            graphics.DrawText(canvas, font, x_pos, y_pos, black, line_text)
 
         # Draw athlete lines
         for idx, athlete in enumerate(page):
-            # Row index on screen (0 is header line, so athletes start at 1)
-            row = idx + 1
+            # Row index on screen (header takes header_rows, so athletes start after that)
+            row = idx + header_rows
             y0 = row * line_height
             y1 = y0 + line_height - 1
 
@@ -430,6 +449,7 @@ def main():
     parser.add_argument('--width', type=int, default=DEFAULT_WIDTH, help='Display width in pixels')
     parser.add_argument('--height', type=int, default=DEFAULT_HEIGHT, help='Display height in pixels')
     parser.add_argument('--line-height', type=int, default=DEFAULT_LINE_HEIGHT, help='Pixels per text line')
+    parser.add_argument('--header-rows', type=int, default=1, help='Number of rows for header (allows text wrapping)')
     parser.add_argument('--interval', type=float, default=DEFAULT_INTERVAL, help='Seconds per page when paging')
     parser.add_argument('--once', action='store_true', help='Render once then exit')
     parser.add_argument('--chain', type=int, default=2, help='Panels chained horizontally')
@@ -464,7 +484,8 @@ def main():
         draw_event_on_matrix(event, matrix_classes, args.font, args.width, args.height,
                              line_height=args.line_height, interval=args.interval,
                              chain=args.chain, parallel=args.parallel, gpio_slowdown=args.gpio_slowdown,
-                             once=args.once, affiliation_colors=affiliation_colors)
+                             once=args.once, affiliation_colors=affiliation_colors,
+                             header_rows=args.header_rows)
     except Exception as e:
         logging.exception("Failed to render event: %s", e)
         sys.exit(5)
