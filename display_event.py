@@ -323,15 +323,22 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
         for y in range(0, line_height):
             graphics.DrawLine(canvas, 0, y, canvas_width - 1, y, white)
 
-        # Header text: black on white. Compute baseline for header line (centered in box)
-        try:
-            header_text_width = sum(font.CharacterWidth(ord(c)) for c in header)
-        except Exception:
-            header_text_width = len(header) * 6
-        x_header = max(0, (canvas_width - header_text_width) // 2)
+        # Header text: black on white. Truncate if needed, then center
+        header_text = header
+        available_header_width = canvas_width - 2  # Leave 1px margin on each side
+        header_text_width = get_text_width(header_text)
+        
+        # Truncate header if it's too wide
+        if header_text_width > available_header_width:
+            while header_text and get_text_width(header_text) > available_header_width:
+                header_text = header_text[:-1]
+            header_text_width = get_text_width(header_text)
+        
+        # Center the (possibly truncated) header
+        x_header = max(1, (canvas_width - header_text_width) // 2)
         # Baseline y for header
         y_header = (line_height + font.height) // 2 - FONT_SHIFT
-        graphics.DrawText(canvas, font, x_header, y_header, black, header)
+        graphics.DrawText(canvas, font, x_header, y_header, black, header_text)
 
         # Draw athlete lines
         for idx, athlete in enumerate(page):
@@ -374,14 +381,14 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
 
                 # Calculate available width for team name (between name_x and suffix column)
                 available_width = suffix_x - name_x - 3  # Leave 3px gap before suffix
-                
+
                 # Truncate team name if needed to fit available space
                 team_name_width = get_text_width(team_name)
                 if team_name_width > available_width:
                     # Truncate character by character until it fits
                     while team_name and get_text_width(team_name) > available_width:
                         team_name = team_name[:-1]
-                
+
                 # Draw team name in middle column
                 graphics.DrawText(canvas, font, name_x, y_txt, text_color, team_name)
 
