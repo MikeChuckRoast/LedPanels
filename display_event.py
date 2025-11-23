@@ -475,6 +475,12 @@ def main():
 
     event = events[key]
 
+    # Check if there are multiple heats for this event/round combination
+    heat_count = sum(1 for k in events.keys() if k[0] == args.event and k[1] == args.round)
+    if heat_count > 1:
+        # Prepend heat number to event name
+        event["name"] = f"#{args.heat} {event['name']}"
+
     matrix_classes = try_import_rgbmatrix()
     if matrix_classes[0] is None:
         logging.error("No rgbmatrix backend available: install 'rgbmatrix' or an emulator module named 'RGBMatrixEmulator' or 'rgbmatrix_emulator'")
