@@ -21,6 +21,7 @@ Design notes:
 """
 
 import argparse
+import csv
 import logging
 import os
 import sys
@@ -34,7 +35,7 @@ DEFAULT_HEIGHT = 32
 DEFAULT_LINE_HEIGHT = 16  # pixels per text line (half a 32px panel)
 #DEFAULT_FONT_PATH = "/home/mike/u8g2/tools/font/bdf/helvB12.bdf"
 DEFAULT_FONT_PATH = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf/helvB12.bdf"
-DEFAULT_INTERVAL = 1.0
+DEFAULT_INTERVAL = 2.0
 FONT_SHIFT = 7
 
 
@@ -62,6 +63,45 @@ def try_import_rgbmatrix():
                 return RGBMatrix, RGBMatrixOptions, graphics
             except Exception:
                 return None, None, None
+
+
+def load_affiliation_colors(csv_path: str) -> Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int]]]:
+    """Load affiliation color mappings from CSV file.
+
+    CSV format: affiliation, bgcolor (hex), textcolor (hex)
+    Returns: Dict mapping affiliation -> ((bg_r, bg_g, bg_b), (text_r, text_g, text_b))
+    """
+    colors = {}
+    if not os.path.isfile(csv_path):
+        logging.warning("Colors file not found: %s", csv_path)
+        return colors
+
+    try:
+        with open(csv_path, "r", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                affil = row.get("affiliation", "").strip()
+                bg_hex = row.get("bgcolor", "").strip()
+                text_hex = row.get("text", "").strip()
+
+                if not affil or not bg_hex or not text_hex:
+                    continue
+
+                # Parse hex colors (format: #RRGGBB)
+                try:
+                    bg_hex = bg_hex.lstrip('#')
+                    text_hex = text_hex.lstrip('#')
+                    bg_rgb = tuple(int(bg_hex[i:i+2], 16) for i in (0, 2, 4))
+                    text_rgb = tuple(int(text_hex[i:i+2], 16) for i in (0, 2, 4))
+                    colors[affil] = (bg_rgb, text_rgb)
+                except ValueError:
+                    logging.warning("Invalid color format for %s: bg=%s, text=%s", affil, bg_hex, text_hex)
+                    continue
+    except Exception as e:
+        logging.error("Failed to load colors from %s: %s", csv_path, e)
+
+    logging.info("Loaded %d affiliation color mappings", len(colors))
+    return colors
 
 
 def parse_lynx_file(path: str) -> Dict[Tuple[int, int, int], Dict]:
@@ -143,7 +183,8 @@ def paginate_items(items: List[Dict], page_size: int):
 
 def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int, height: int,
                          line_height: int = DEFAULT_LINE_HEIGHT, interval: float = DEFAULT_INTERVAL,
-                         chain: int = 2, parallel: int = 1, gpio_slowdown: int = 3, once: bool = False):
+                         chain: int = 2, parallel: int = 1, gpio_slowdown: int = 3, once: bool = False,
+                         affiliation_colors: Optional[Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int]]]] = None):
     """Render the given event repeatedly (paging) onto the RGB matrix.
 
     `matrix_classes` is the tuple returned by `try_import_rgbmatrix()`.
@@ -239,9 +280,20 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
             row = idx + 1
             y0 = row * line_height
             y1 = y0 + line_height - 1
-            # Fill background black for this line
+
+            # Look up colors for this athlete's affiliation
+            affil = (athlete.get("affiliation") or "").strip()
+            text_color = white
+            bg_color = black
+
+            if affiliation_colors and affil in affiliation_colors:
+                bg_rgb, text_rgb = affiliation_colors[affil]
+                bg_color = graphics.Color(bg_rgb[0], bg_rgb[1], bg_rgb[2])
+                text_color = graphics.Color(text_rgb[0], text_rgb[1], text_rgb[2])
+
+            # Fill background for this line
             for y in range(y0, y1 + 1):
-                graphics.DrawLine(canvas, 0, y, canvas_width - 1, y, black)
+                graphics.DrawLine(canvas, 0, y, canvas_width - 1, y, bg_color)
 
             # Draw lane and name in columns
             lane_txt = (athlete.get("lane") or "").strip()
@@ -249,9 +301,9 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
             # Baseline for this row
             y_txt = y0 + (line_height + font.height) // 2 - FONT_SHIFT
             # Draw lane (left column)
-            graphics.DrawText(canvas, font, lane_x, y_txt, white, lane_txt)
+            graphics.DrawText(canvas, font, lane_x, y_txt, text_color, lane_txt)
             # Draw name starting at name_x
-            graphics.DrawText(canvas, font, name_x, y_txt, white, name_txt)
+            graphics.DrawText(canvas, font, name_x, y_txt, text_color, name_txt)
 
         # Push to matrix
         try:
@@ -278,6 +330,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
     parser = argparse.ArgumentParser(description="Display an event from lynx.evt on LED matrix")
     parser.add_argument('--file', '-f', default='lynx.evt', help='Path to lynx.evt file')
+    parser.add_argument('--colors-csv', default='colors.csv', help='Path to colors CSV file (affiliation,bgcolor,text)')
     parser.add_argument('--event', type=int, required=True, help='Event number')
     parser.add_argument('--round', type=int, required=True, help='Round number')
     parser.add_argument('--heat', type=int, required=True, help='Heat number')
@@ -298,6 +351,9 @@ def main():
         logging.error("Failed to parse lynx file: %s", e)
         sys.exit(2)
 
+    # Load affiliation colors
+    affiliation_colors = load_affiliation_colors(args.colors_csv)
+
     key = (args.event, args.round, args.heat)
     if key not in events:
         logging.error("Requested event not found: %s", key)
@@ -316,7 +372,7 @@ def main():
         draw_event_on_matrix(event, matrix_classes, args.font, args.width, args.height,
                              line_height=args.line_height, interval=args.interval,
                              chain=args.chain, parallel=args.parallel, gpio_slowdown=args.gpio_slowdown,
-                             once=args.once)
+                             once=args.once, affiliation_colors=affiliation_colors)
     except Exception as e:
         logging.exception("Failed to render event: %s", e)
         sys.exit(5)
