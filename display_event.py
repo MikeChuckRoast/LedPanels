@@ -164,15 +164,63 @@ def parse_lynx_file(path: str) -> Dict[Tuple[int, int, int], Dict]:
     return events
 
 
-def format_athlete_line(a: Dict) -> str:
-    """Format athlete display string for the name column: 'First L'.
+def is_relay_event(athletes: List[Dict]) -> bool:
+    """Detect if this is a relay event based on athlete data.
+
+    Relay events have:
+    - All first names empty
+    - Last names matching pattern like 'Riverview' or 'Milan'
+    - Affiliation matching pattern like 'RICO  A' or 'MILA  A'
+    """
+    if not athletes:
+        return False
+
+    import re
+    for athlete in athletes:
+        first = (athlete.get("first") or "").strip()
+        last = (athlete.get("last") or "").strip()
+        affil = (athlete.get("affiliation") or "").strip()
+
+        # If any athlete has a first name, it's not a relay
+        if first:
+            return False
+
+        # Check if affiliation matches relay pattern (3-4 letters, spaces, then a letter)
+        if not re.match(r'^\w{3,4}\s+\w$', affil):
+            return False
+
+    return True
+
+
+def extract_relay_suffix(affiliation: str) -> str:
+    """Extract the relay suffix letter from affiliation (e.g., 'RICO  A' -> 'A')."""
+    affil = affiliation.strip()
+    if affil:
+        # Get the last non-space character
+        return affil.split()[-1] if affil.split() else ""
+    return ""
+
+
+def format_athlete_line(a: Dict, is_relay: bool = False) -> str:
+    """Format athlete display string for the name column.
+
+    For individual events: 'First L'
+    For relay events: 'Team Name A' (team from last name, suffix from affiliation)
 
     NOTE: lane is displayed separately in its own column.
     """
-    first = (a.get("first") or "").strip()
-    last = (a.get("last") or "").strip()
-    last_initial = (last[0] + '.') if last else ""
-    return f"{first} {last_initial}".strip()
+    if is_relay:
+        # For relay events, last name contains team name
+        team_name = (a.get("last") or "").strip()
+        affiliation = (a.get("affiliation") or "").strip()
+        suffix = extract_relay_suffix(affiliation)
+        return f"{team_name} {suffix}".strip()
+    else:
+        # For individual events
+        first = (a.get("first") or "").strip()
+        last = (a.get("last") or "").strip()
+        last_initial = (last[0] + '.') if last else ""
+        return f"{first} {last_initial}".strip()
 
 
 def paginate_items(items: List[Dict], page_size: int):
@@ -218,6 +266,9 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
     athletes = event.get("athletes", [])
     athlete_pages = list(paginate_items(athletes, athlete_lines_per_page)) or [[]]
 
+    # Detect if this is a relay event
+    is_relay = is_relay_event(athletes)
+
     # Colors
     white = graphics.Color(255, 255, 255)
     black = graphics.Color(0, 0, 0)
@@ -255,6 +306,14 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
     lane_x = 1
     name_x = lane_x + lane_col_width + 3
 
+    # For relay events, reserve space on the right for suffix letter
+    suffix_col_width = 0
+    suffix_x = 0
+    if is_relay:
+        # Reserve space for suffix (e.g., "A", "B") plus padding
+        suffix_col_width = get_text_width("W") + 2  # Use 'W' as widest letter
+        suffix_x = canvas_width - suffix_col_width - 1
+
     def render_page(page_index: int):
         nonlocal canvas
         page = athlete_pages[page_index]
@@ -281,13 +340,19 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
             y0 = row * line_height
             y1 = y0 + line_height - 1
 
-            # Look up colors for this athlete's affiliation
-            affil = (athlete.get("affiliation") or "").strip()
+            # Look up colors - for relay events, use last name (team name) for color lookup
+            if is_relay:
+                # For relay events, last name contains the team name
+                color_key = (athlete.get("last") or "").strip()
+            else:
+                # For individual events, use affiliation
+                color_key = (athlete.get("affiliation") or "").strip()
+
             text_color = white
             bg_color = black
 
-            if affiliation_colors and affil in affiliation_colors:
-                bg_rgb, text_rgb = affiliation_colors[affil]
+            if affiliation_colors and color_key in affiliation_colors:
+                bg_rgb, text_rgb = affiliation_colors[color_key]
                 bg_color = graphics.Color(bg_rgb[0], bg_rgb[1], bg_rgb[2])
                 text_color = graphics.Color(text_rgb[0], text_rgb[1], text_rgb[2])
 
@@ -297,15 +362,35 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
 
             # Draw lane and name in columns
             lane_txt = (athlete.get("lane") or "").strip()
-            name_txt = format_athlete_line(athlete)
             # Baseline for this row
             y_txt = y0 + (line_height + font.height) // 2 - FONT_SHIFT
             # Draw lane (left column)
             graphics.DrawText(canvas, font, lane_x, y_txt, text_color, lane_txt)
-            # Draw name starting at name_x
-            graphics.DrawText(canvas, font, name_x, y_txt, text_color, name_txt)
 
-        # Push to matrix
+            if is_relay:
+                # For relay: draw team name in middle, suffix on far right
+                team_name = (athlete.get("last") or "").strip()
+                suffix = extract_relay_suffix((athlete.get("affiliation") or "").strip())
+
+                # Calculate available width for team name (between name_x and suffix column)
+                available_width = suffix_x - name_x - 3  # Leave 3px gap before suffix
+                
+                # Truncate team name if needed to fit available space
+                team_name_width = get_text_width(team_name)
+                if team_name_width > available_width:
+                    # Truncate character by character until it fits
+                    while team_name and get_text_width(team_name) > available_width:
+                        team_name = team_name[:-1]
+                
+                # Draw team name in middle column
+                graphics.DrawText(canvas, font, name_x, y_txt, text_color, team_name)
+
+                # Draw suffix in right column
+                graphics.DrawText(canvas, font, suffix_x, y_txt, text_color, suffix)
+            else:
+                # For individual: draw name normally
+                name_txt = format_athlete_line(athlete, is_relay=False)
+                graphics.DrawText(canvas, font, name_x, y_txt, text_color, name_txt)        # Push to matrix
         try:
             canvas = matrix.SwapOnVSync(canvas)
         except Exception as ex:
