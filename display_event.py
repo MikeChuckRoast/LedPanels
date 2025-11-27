@@ -25,9 +25,17 @@ import csv
 import logging
 import os
 import sys
+import threading
 import time
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
+
+try:
+    from pynput import keyboard
+    KEYBOARD_AVAILABLE = True
+except ImportError:
+    KEYBOARD_AVAILABLE = False
+    logging.warning("pynput not available. Keyboard navigation disabled.")
 
 # Default configuration
 DEFAULT_WIDTH = 64
@@ -37,6 +45,10 @@ DEFAULT_LINE_HEIGHT = 16  # pixels per text line (half a 32px panel)
 DEFAULT_FONT_PATH = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf/helvB12.bdf"
 DEFAULT_INTERVAL = 2.0
 FONT_SHIFT = 7
+
+# Global state for keyboard navigation
+heat_change_lock = threading.Lock()
+heat_change_request = None  # None, 'next', 'prev', or 'reset'
 
 
 def try_import_rgbmatrix():
@@ -237,6 +249,7 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
     """Render the given event repeatedly (paging) onto the RGB matrix.
 
     `matrix_classes` is the tuple returned by `try_import_rgbmatrix()`.
+    Returns True if should continue running, False if should reload with different heat.
     """
     RGBMatrix, RGBMatrixOptions, graphics = matrix_classes
     if RGBMatrix is None:
@@ -457,13 +470,60 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
     try:
         if once:
             render_page(page_idx)
-            return
+            return True
         while True:
             render_page(page_idx)
-            time.sleep(interval)
+
+            # Sleep in small increments to check for heat changes more frequently
+            elapsed = 0.0
+            check_interval = 0.1  # Check every 100ms for better responsiveness
+            while elapsed < interval:
+                # Check for heat change request
+                global heat_change_request
+                with heat_change_lock:
+                    if heat_change_request is not None:
+                        matrix.Clear()
+                        return False  # Signal to reload
+
+                time.sleep(check_interval)
+                elapsed += check_interval
+
             page_idx = (page_idx + 1) % page_count
     except KeyboardInterrupt:
         matrix.Clear()
+        return True
+
+
+def on_key_press(key):
+    """Handle keyboard events for heat navigation."""
+    global heat_change_request
+
+    # Debug: log all key presses
+    logging.debug("Key pressed: %s", key)
+
+    # Check for special keys first
+    if hasattr(key, 'name'):
+        # Special key (Page Up, Page Down, etc.)
+        if key == keyboard.Key.page_down:
+            with heat_change_lock:
+                heat_change_request = 'next'
+            logging.info("Page Down pressed - next heat")
+            return
+        elif key == keyboard.Key.page_up:
+            with heat_change_lock:
+                heat_change_request = 'prev'
+            logging.info("Page Up pressed - previous heat")
+            return
+
+    # Check for character keys (like period)
+    try:
+        if hasattr(key, 'char') and key.char == '.':
+            with heat_change_lock:
+                heat_change_request = 'reset'
+            logging.info("Period pressed - resetting to original heat")
+            return
+    except AttributeError:
+        pass
 
 
 def main():
@@ -495,35 +555,86 @@ def main():
     # Load affiliation colors
     affiliation_colors = load_affiliation_colors(args.colors_csv)
 
-    key = (args.event, args.round, args.heat)
-    if key not in events:
-        logging.error("Requested event not found: %s", key)
-        # Show available events briefly
-        logging.info("Available events: %s", sorted(events.keys()))
-        sys.exit(3)
+    # Start keyboard listener if available
+    keyboard_listener = None
+    if KEYBOARD_AVAILABLE:
+        keyboard_listener = keyboard.Listener(on_press=on_key_press)
+        keyboard_listener.start()
+        logging.info("Keyboard navigation enabled: Page Down (next heat), Page Up (prev heat), Period (reset)")
 
-    event = events[key]
-
-    # Check if there are multiple heats for this event/round combination
-    heat_count = sum(1 for k in events.keys() if k[0] == args.event and k[1] == args.round)
-    if heat_count > 1:
-        # Prepend heat number to event name
-        event["name"] = f"#{args.heat} {event['name']}"
+    # Store original heat number
+    original_heat = args.heat
+    current_heat = args.heat
 
     matrix_classes = try_import_rgbmatrix()
     if matrix_classes[0] is None:
         logging.error("No rgbmatrix backend available: install 'rgbmatrix' or an emulator module named 'RGBMatrixEmulator' or 'rgbmatrix_emulator'")
         sys.exit(4)
 
+    # Main loop - allows reloading when heat changes
     try:
-        draw_event_on_matrix(event, matrix_classes, args.font, args.width, args.height,
-                             line_height=args.line_height, interval=args.interval,
-                             chain=args.chain, parallel=args.parallel, gpio_slowdown=args.gpio_slowdown,
-                             once=args.once, affiliation_colors=affiliation_colors,
-                             header_rows=args.header_rows)
+        while True:
+            key = (args.event, args.round, current_heat)
+            if key not in events:
+                logging.error("Requested event not found: %s", key)
+                # Show available events briefly
+                logging.info("Available events: %s", sorted(events.keys()))
+                sys.exit(3)
+
+            # Make a copy of the event to avoid modifying the original
+            event = events[key].copy()
+            event["athletes"] = events[key]["athletes"]  # Share the athletes list (no modification needed)
+
+            # Check if there are multiple heats for this event/round combination
+            heat_count = sum(1 for k in events.keys() if k[0] == args.event and k[1] == args.round)
+            if heat_count > 1:
+                # Prepend heat number to event name (on the copy)
+                event["name"] = f"#{current_heat} {event['name']}"
+
+            # Draw the event
+            should_continue = draw_event_on_matrix(event, matrix_classes, args.font, args.width, args.height,
+                                 line_height=args.line_height, interval=args.interval,
+                                 chain=args.chain, parallel=args.parallel, gpio_slowdown=args.gpio_slowdown,
+                                 once=args.once, affiliation_colors=affiliation_colors,
+                                 header_rows=args.header_rows)
+
+            if should_continue or args.once:
+                break
+
+            # Handle heat change request
+            global heat_change_request
+            with heat_change_lock:
+                if heat_change_request == 'next':
+                    # Try next heat
+                    next_heat = current_heat + 1
+                    if (args.event, args.round, next_heat) in events:
+                        current_heat = next_heat
+                        logging.info("Switching to heat %d", current_heat)
+                    else:
+                        logging.info("No heat %d found, staying on heat %d", next_heat, current_heat)
+                elif heat_change_request == 'prev':
+                    # Try previous heat (minimum 1)
+                    prev_heat = max(1, current_heat - 1)
+                    if prev_heat != current_heat and (args.event, args.round, prev_heat) in events:
+                        current_heat = prev_heat
+                        logging.info("Switching to heat %d", current_heat)
+                    else:
+                        logging.info("Cannot go to heat %d, staying on heat %d", prev_heat, current_heat)
+                elif heat_change_request == 'reset':
+                    # Reset to original heat
+                    if current_heat != original_heat:
+                        current_heat = original_heat
+                        logging.info("Resetting to original heat %d", current_heat)
+                    else:
+                        logging.info("Already at original heat %d", current_heat)
+
+                heat_change_request = None  # Clear the request
     except Exception as e:
         logging.exception("Failed to render event: %s", e)
         sys.exit(5)
+    finally:
+        if keyboard_listener:
+            keyboard_listener.stop()
 
 
 if __name__ == '__main__':
