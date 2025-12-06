@@ -29,15 +29,10 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 # Import from local modules
-from event_parser import (
-    parse_lynx_file,
-    load_affiliation_colors,
-    is_relay_event,
-    extract_relay_suffix,
-    format_athlete_line,
-    fill_lanes_with_empty_rows,
-    paginate_items,
-)
+from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
+                          format_athlete_line, is_relay_event,
+                          load_affiliation_colors, paginate_items,
+                          parse_lynx_file)
 from matrix_backend import get_matrix_backend
 
 try:
@@ -48,11 +43,11 @@ except ImportError:
     logging.warning("pynput not available. Keyboard navigation disabled.")
 
 # Default configuration
-DEFAULT_WIDTH = 64
-DEFAULT_HEIGHT = 32
+DEFAULT_WIDTH = 128
+DEFAULT_HEIGHT = 64
 DEFAULT_LINE_HEIGHT = 16  # pixels per text line (half a 32px panel)
-#DEFAULT_FONT_PATH = "/home/mike/u8g2/tools/font/bdf/helvB12.bdf"
-DEFAULT_FONT_PATH = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf/helvB12.bdf"
+DEFAULT_FONT_PATH = "/home/mike/u8g2/tools/font/bdf/helvB12.bdf"
+#DEFAULT_FONT_PATH = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf/helvB12.bdf"
 DEFAULT_INTERVAL = 2.0
 FONT_SHIFT = 7
 
@@ -358,6 +353,8 @@ def main():
     parser.add_argument('--fpp', action='store_true', help='Use FPP output instead of direct matrix control')
     parser.add_argument('--fpp-host', default=FPP_DEFAULT_HOST, help='FPP host IP address')
     parser.add_argument('--fpp-port', type=int, default=FPP_DEFAULT_PORT, help='FPP DDP port')
+    parser.add_argument('--colorlight', action='store_true', help='Send frames directly to ColorLight 5A-75B via raw Ethernet (requires root/sudo)')
+    parser.add_argument('--colorlight-interface', default='eth0', help='Network interface name for ColorLight (e.g., eth0, enp0s3)')
     args = parser.parse_args()
 
     try:
@@ -380,11 +377,13 @@ def main():
     original_heat = args.heat
     current_heat = args.heat
 
-    # Get appropriate matrix backend (direct, emulator, or FPP)
+    # Get appropriate matrix backend (direct, emulator, FPP, or ColorLight)
     matrix_classes = get_matrix_backend(
         use_fpp=args.fpp,
         fpp_host=args.fpp_host,
         fpp_port=args.fpp_port,
+        use_colorlight=args.colorlight,
+        colorlight_interface=args.colorlight_interface,
         width=args.width,
         height=args.height
     )

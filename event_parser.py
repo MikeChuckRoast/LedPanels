@@ -16,13 +16,13 @@ from typing import Dict, List, Optional, Tuple
 
 def parse_hex_color(hex_str: str) -> Tuple[int, int, int]:
     """Parse a hex color string to RGB tuple.
-    
+
     Args:
         hex_str: Hex color string (with or without # prefix)
-        
+
     Returns:
         Tuple of (r, g, b) values (0-255)
-        
+
     Raises:
         ValueError: If hex string is invalid
     """
