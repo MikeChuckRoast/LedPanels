@@ -55,11 +55,12 @@ except ImportError:
         logging.warning("No keyboard library available (tried evdev, pynput). Keyboard navigation disabled.")
 
 # Default configuration
-DEFAULT_WIDTH = 128
-DEFAULT_HEIGHT = 64
-DEFAULT_LINE_HEIGHT = 16  # pixels per text line (half a 32px panel)
-DEFAULT_FONT_PATH = "/home/mike/u8g2/tools/font/bdf/helvB12.bdf"
-#DEFAULT_FONT_PATH = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf/helvB12.bdf"
+DEFAULT_WIDTH = 64
+DEFAULT_HEIGHT = 32
+DEFAULT_LINE_HEIGHT = 24  # pixels per text line for athlete rows
+DEFAULT_HEADER_LINE_HEIGHT = 16  # pixels per text line for header rows
+#DEFAULT_FONT_PATH = "/home/mike/u8g2/tools/font/bdf/helvB12.bdf"
+DEFAULT_FONT_PATH = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf/helvB12.bdf"
 DEFAULT_INTERVAL = 2.0
 FONT_SHIFT = 7
 
@@ -77,9 +78,10 @@ heat_change_request = None  # None, 'next', 'prev', or 'reset'
 
 
 def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int, height: int,
-                         line_height: int = DEFAULT_LINE_HEIGHT, interval: float = DEFAULT_INTERVAL,
-                         chain: int = 2, parallel: int = 1, gpio_slowdown: int = 3, once: bool = False,
-                         affiliation_colors: Optional[Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int]]]] = None,
+                         line_height: int = DEFAULT_LINE_HEIGHT, header_line_height: int = DEFAULT_HEADER_LINE_HEIGHT,
+                         interval: float = DEFAULT_INTERVAL, chain: int = 2, parallel: int = 1,
+                         gpio_slowdown: int = 3, once: bool = False,
+                         affiliation_colors: Optional[Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int], str]]] = None,
                          header_rows: int = 1):
     """Render the given event repeatedly (paging) onto the RGB matrix.
 
@@ -104,11 +106,12 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
     canvas_width = canvas.width
     canvas_height = canvas.height
 
-    # Calculate how many athlete lines fit per page: total lines minus header_rows
-    total_lines = canvas_height // line_height
-    athlete_lines_per_page = max(0, total_lines - header_rows)
+    # Calculate header height and remaining height for athletes
+    header_height = header_rows * header_line_height
+    remaining_height = canvas_height - header_height
+    athlete_lines_per_page = max(0, remaining_height // line_height)
     if athlete_lines_per_page <= 0:
-        raise RuntimeError("Display height too small for required line height and header rows")
+        raise RuntimeError("Display height too small for required line heights and header rows")
 
     # Prepare text elements
     header = event.get("name", "")
@@ -174,7 +177,7 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
         canvas.Clear()
 
         # Draw header background (white) for the header_rows
-        header_height = header_rows * line_height
+        header_height = header_rows * header_line_height
         for y in range(0, header_height):
             graphics.DrawLine(canvas, 0, y, canvas_width - 1, y, white)
 
@@ -209,20 +212,20 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
         for line_idx, line_text in enumerate(header_lines):
             line_width = get_text_width(line_text)
             x_pos = max(1, (canvas_width - line_width) // 2)
-            y_pos = (line_idx * line_height) + (line_height + font.height) // 2 - FONT_SHIFT
+            y_pos = (line_idx * header_line_height) + (header_line_height + font.height) // 2 - FONT_SHIFT
             graphics.DrawText(canvas, font, x_pos, y_pos, black, line_text)
 
         # Draw athlete lines
         for idx, athlete in enumerate(page):
-            # Row index on screen (header takes header_rows, so athletes start after that)
-            row = idx + header_rows
-            y0 = row * line_height
+            # Y position starts after header
+            y0 = header_height + (idx * line_height)
             y1 = y0 + line_height - 1
 
             # Check if this is an empty lane (only has lane number, no athlete data)
             has_athlete = bool((athlete.get("last") or "").strip() or (athlete.get("first") or "").strip())
 
             # Look up colors - for relay events, use last name (team name) for color lookup
+            display_name = None
             if is_relay and has_athlete:
                 # For relay events, last name contains the team name
                 color_key = (athlete.get("last") or "").strip()
@@ -236,7 +239,7 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
             bg_color = black
 
             if has_athlete and affiliation_colors and color_key in affiliation_colors:
-                bg_rgb, text_rgb = affiliation_colors[color_key]
+                bg_rgb, text_rgb, display_name = affiliation_colors[color_key]
                 bg_color = graphics.Color(bg_rgb[0], bg_rgb[1], bg_rgb[2])
                 text_color = graphics.Color(text_rgb[0], text_rgb[1], text_rgb[2])
 
@@ -255,7 +258,8 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
             if has_athlete:
                 if is_relay:
                     # For relay: draw team name in middle, suffix on far right
-                    team_name = (athlete.get("last") or "").strip()
+                    # Use display_name from colors.csv if available, otherwise use last name
+                    team_name = display_name if display_name else (athlete.get("last") or "").strip()
                     suffix = extract_relay_suffix((athlete.get("affiliation") or "").strip())
 
                     # Calculate available width for team name (between name_x and suffix column)
@@ -477,12 +481,13 @@ def main():
     parser.add_argument('--font', default=DEFAULT_FONT_PATH, help='Path to BDF font for rgbmatrix')
     parser.add_argument('--width', type=int, default=DEFAULT_WIDTH, help='Display width in pixels')
     parser.add_argument('--height', type=int, default=DEFAULT_HEIGHT, help='Display height in pixels')
-    parser.add_argument('--line-height', type=int, default=DEFAULT_LINE_HEIGHT, help='Pixels per text line')
+    parser.add_argument('--line-height', type=int, default=DEFAULT_LINE_HEIGHT, help='Pixels per text line for athlete rows')
+    parser.add_argument('--header-line-height', type=int, default=DEFAULT_HEADER_LINE_HEIGHT, help='Pixels per text line for header rows')
     parser.add_argument('--header-rows', type=int, default=1, help='Number of rows for header (allows text wrapping)')
     parser.add_argument('--interval', type=float, default=DEFAULT_INTERVAL, help='Seconds per page when paging')
     parser.add_argument('--once', action='store_true', help='Render once then exit')
     parser.add_argument('--chain', type=int, default=2, help='Panels chained horizontally')
-    parser.add_argument('--parallel', type=int, default=1, help='Panels stacked vertically')
+    parser.add_argument('--parallel', type=int, default=4, help='Panels stacked vertically')
     parser.add_argument('--gpio-slowdown', type=int, default=3, help='GPIO slowdown for RGBMatrixOptions')
     parser.add_argument('--fpp', action='store_true', help='Use FPP output instead of direct matrix control')
     parser.add_argument('--fpp-host', default=FPP_DEFAULT_HOST, help='FPP host IP address')
@@ -562,10 +567,10 @@ def main():
 
             # Draw the event
             should_continue = draw_event_on_matrix(event, matrix_classes, args.font, args.width, args.height,
-                                 line_height=args.line_height, interval=args.interval,
-                                 chain=args.chain, parallel=args.parallel, gpio_slowdown=args.gpio_slowdown,
-                                 once=args.once, affiliation_colors=affiliation_colors,
-                                 header_rows=args.header_rows)
+                                 line_height=args.line_height, header_line_height=args.header_line_height,
+                                 interval=args.interval, chain=args.chain, parallel=args.parallel,
+                                 gpio_slowdown=args.gpio_slowdown, once=args.once,
+                                 affiliation_colors=affiliation_colors, header_rows=args.header_rows)
 
             if should_continue or args.once:
                 break

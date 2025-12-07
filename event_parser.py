@@ -35,11 +35,11 @@ def parse_hex_color(hex_str: str) -> Tuple[int, int, int]:
         raise ValueError(f"Invalid hex color format: {hex_str}") from e
 
 
-def load_affiliation_colors(csv_path: str) -> Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int]]]:
+def load_affiliation_colors(csv_path: str) -> Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int], str]]:
     """Load affiliation color mappings from CSV file.
 
-    CSV format: affiliation, bgcolor (hex), textcolor (hex)
-    Returns: Dict mapping affiliation -> ((bg_r, bg_g, bg_b), (text_r, text_g, text_b))
+    CSV format: affiliation, name, bgcolor (hex), textcolor (hex)
+    Returns: Dict mapping affiliation -> ((bg_r, bg_g, bg_b), (text_r, text_g, text_b), display_name)
     """
     colors = {}
     if not os.path.isfile(csv_path):
@@ -51,6 +51,7 @@ def load_affiliation_colors(csv_path: str) -> Dict[str, Tuple[Tuple[int, int, in
             reader = csv.DictReader(fh)
             for row in reader:
                 affil = row.get("affiliation", "").strip()
+                name = row.get("name", "").strip()
                 bg_hex = row.get("bgcolor", "").strip()
                 text_hex = row.get("text", "").strip()
 
@@ -61,7 +62,9 @@ def load_affiliation_colors(csv_path: str) -> Dict[str, Tuple[Tuple[int, int, in
                 try:
                     bg_rgb = parse_hex_color(bg_hex)
                     text_rgb = parse_hex_color(text_hex)
-                    colors[affil] = (bg_rgb, text_rgb)
+                    # Store display name (use affiliation as fallback if name is empty)
+                    display_name = name if name else affil
+                    colors[affil] = (bg_rgb, text_rgb, display_name)
                 except ValueError:
                     logging.warning("Invalid color format for %s: bg=%s, text=%s", affil, bg_hex, text_hex)
                     continue
