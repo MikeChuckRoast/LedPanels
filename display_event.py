@@ -582,8 +582,8 @@ def main():
                     else:
                         logging.info("No heat %d found, staying on heat %d", next_heat, current_heat)
                 elif heat_change_request == 'prev':
-                    # Try previous heat (minimum 1)
-                    prev_heat = max(1, current_heat - 1)
+                    # Try previous heat (minimum original_heat)
+                    prev_heat = max(original_heat, current_heat - 1)
                     if prev_heat != current_heat and (args.event, args.round, prev_heat) in events:
                         current_heat = prev_heat
                         logging.info("Switching to heat %d", current_heat)
