@@ -1,0 +1,57 @@
+# LED Panels Display Configuration Example
+# Copy this file to settings.toml and customize for your setup
+
+[hardware]
+# Physical panel configuration
+width = 64           # Display width in pixels
+height = 32          # Display height in pixels
+chain = 2            # Panels chained horizontally
+parallel = 4         # Panels stacked vertically
+gpio_slowdown = 3    # GPIO slowdown for RGBMatrixOptions (0-4, higher = slower but more stable)
+
+[display]
+# Display layout and timing
+line_height = 24              # Athlete row height in pixels
+header_line_height = 16       # Header row height in pixels
+header_rows = 2               # Number of header rows (allows text wrapping for long event names)
+interval = 2.0                # Seconds per page when paging through athletes
+font_shift = 7                # Font positioning adjustment (vertical offset in pixels)
+
+[fonts]
+# Font file paths
+# Use absolute paths to BDF font files
+# Examples:
+#   macOS:   "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf/helvB12.bdf"
+#   Linux:   "/home/mike/u8g2/tools/font/bdf/helvB12.bdf"
+#   Windows: "C:/Users/mike/Documents/fonts/helvB12.bdf"
+font_path = "/home/mike/u8g2/tools/font/bdf/helvB12.bdf"
+
+[files]
+# Data file paths (relative to config directory)
+lynx_file = "lynx.evt"       # Event timing data file (CSV format from Lynx timing system)
+colors_file = "colors.csv"   # Team color mappings file (affiliation,name,bgcolor,text)
+
+[network]
+# Output backend configuration
+# Only one backend should be enabled at a time: direct matrix control, FPP, or ColorLight
+
+# FPP (Falcon Player Protocol) network output
+# Use this to send display data to a remote FPP instance over the network
+fpp_enabled = false
+fpp_host = "127.0.0.1"       # IP address of FPP receiver
+fpp_port = 4048              # DDP port (default: 4048)
+
+# ColorLight 5A-75B direct Ethernet output
+# Sends frames directly to ColorLight controller via raw Ethernet (requires root/sudo on Linux)
+colorlight_enabled = true
+colorlight_interface = "eth0"  # Network interface name (e.g., eth0, enp0s3, wlan0)
+
+[keyboard]
+# Keyboard input settings for event navigation
+# Leave empty for auto-detection, or specify device path for evdev on Linux
+# Example: "/dev/input/event2"
+device_path = ""
+
+[behavior]
+# Runtime behavior
+once = false  # If true, render once and exit; if false, loop continuously with paging

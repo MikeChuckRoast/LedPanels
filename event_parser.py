@@ -38,6 +38,9 @@ def parse_hex_color(hex_str: str) -> Tuple[int, int, int]:
 def load_affiliation_colors(csv_path: str) -> Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int], str]]:
     """Load affiliation color mappings from CSV file.
 
+    Args:
+        csv_path: Absolute or relative path to colors CSV file
+
     CSV format: affiliation, name, bgcolor (hex), textcolor (hex)
     Returns: Dict mapping affiliation -> ((bg_r, bg_g, bg_b), (text_r, text_g, text_b), display_name)
     """
@@ -77,6 +80,9 @@ def load_affiliation_colors(csv_path: str) -> Dict[str, Tuple[Tuple[int, int, in
 
 def parse_lynx_file(path: str) -> Dict[Tuple[int, int, int], Dict]:
     """Parse the lynx.evt CSV file into a mapping of (event, round, heat) -> event dict.
+
+    Args:
+        path: Absolute or relative path to lynx.evt file
 
     Event header lines start with a number in the first column. Athlete lines
     have an empty first column (start with a comma).

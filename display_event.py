@@ -26,9 +26,12 @@ import os
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 # Import from local modules
+from config_loader import (ConfigError, ensure_config_directory,
+                           load_current_event, load_settings)
 from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
                           format_athlete_line, is_relay_event,
                           load_affiliation_colors, paginate_items,
@@ -54,20 +57,6 @@ except ImportError:
     except ImportError:
         logging.warning("No keyboard library available (tried evdev, pynput). Keyboard navigation disabled.")
 
-# Default configuration
-DEFAULT_WIDTH = 64
-DEFAULT_HEIGHT = 32
-DEFAULT_LINE_HEIGHT = 24  # pixels per text line for athlete rows
-DEFAULT_HEADER_LINE_HEIGHT = 16  # pixels per text line for header rows
-#DEFAULT_FONT_PATH = "/home/mike/u8g2/tools/font/bdf/helvB12.bdf"
-DEFAULT_FONT_PATH = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf/helvB12.bdf"
-DEFAULT_INTERVAL = 2.0
-FONT_SHIFT = 7
-
-# FPP configuration
-FPP_DEFAULT_HOST = "127.0.0.1"
-FPP_DEFAULT_PORT = 4048
-
 # Global state for keyboard navigation
 heat_change_lock = threading.Lock()
 heat_change_request = None  # None, 'next', 'prev', or 'reset'
@@ -78,9 +67,9 @@ heat_change_request = None  # None, 'next', 'prev', or 'reset'
 
 
 def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int, height: int,
-                         line_height: int = DEFAULT_LINE_HEIGHT, header_line_height: int = DEFAULT_HEADER_LINE_HEIGHT,
-                         interval: float = DEFAULT_INTERVAL, chain: int = 2, parallel: int = 1,
-                         gpio_slowdown: int = 3, once: bool = False,
+                         line_height: int, header_line_height: int,
+                         interval: float, chain: int, parallel: int,
+                         gpio_slowdown: int, once: bool, font_shift: int,
                          affiliation_colors: Optional[Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int], str]]] = None,
                          header_rows: int = 1):
     """Render the given event repeatedly (paging) onto the RGB matrix.
@@ -212,7 +201,7 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
         for line_idx, line_text in enumerate(header_lines):
             line_width = get_text_width(line_text)
             x_pos = max(1, (canvas_width - line_width) // 2)
-            y_pos = (line_idx * header_line_height) + (header_line_height + font.height) // 2 - FONT_SHIFT
+            y_pos = (line_idx * header_line_height) + (header_line_height + font.height) // 2 - font_shift
             graphics.DrawText(canvas, font, x_pos, y_pos, black, line_text)
 
         # Draw athlete lines
@@ -250,7 +239,7 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
             # Draw lane and name in columns
             lane_txt = (athlete.get("lane") or "").strip()
             # Baseline for this row
-            y_txt = y0 + (line_height + font.height) // 2 - FONT_SHIFT
+            y_txt = y0 + (line_height + font.height) // 2 - font_shift
             # Draw lane (left column)
             graphics.DrawText(canvas, font, lane_x, y_txt, text_color, lane_txt)
 
@@ -472,29 +461,67 @@ def on_key_press_pynput(key):
 
 def main():
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+
+    # First parse to get config-dir
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument('--config-dir', default='./config')
+    pre_args, _ = pre_parser.parse_known_args()
+    config_dir = pre_args.config_dir
+
+    # Ensure config directory exists and has default files
+    try:
+        ensure_config_directory(config_dir)
+    except ConfigError as e:
+        logging.error(f"Configuration error: {e}")
+        sys.exit(1)
+
+    # Load settings and current event
+    try:
+        settings = load_settings(config_dir)
+        current_event = load_current_event(config_dir)
+    except ConfigError as e:
+        logging.error(f"Configuration error: {e}")
+        sys.exit(1)
+
+    # Extract settings for easier access
+    hw = settings['hardware']
+    disp = settings['display']
+    fonts = settings['fonts']
+    files = settings['files']
+    net = settings['network']
+    kbd = settings['keyboard']
+    behavior = settings['behavior']
+
+    # Resolve file paths relative to config directory
+    config_path = Path(config_dir)
+    lynx_file_path = str(config_path / files['lynx_file'])
+    colors_file_path = str(config_path / files['colors_file'])
+
+    # Now parse all arguments with defaults from config
     parser = argparse.ArgumentParser(description="Display an event from lynx.evt on LED matrix")
-    parser.add_argument('--file', '-f', default='lynx.evt', help='Path to lynx.evt file')
-    parser.add_argument('--colors-csv', default='colors.csv', help='Path to colors CSV file (affiliation,bgcolor,text)')
-    parser.add_argument('--event', type=int, required=True, help='Event number')
-    parser.add_argument('--round', type=int, required=True, help='Round number')
-    parser.add_argument('--heat', type=int, required=True, help='Heat number')
-    parser.add_argument('--font', default=DEFAULT_FONT_PATH, help='Path to BDF font for rgbmatrix')
-    parser.add_argument('--width', type=int, default=DEFAULT_WIDTH, help='Display width in pixels')
-    parser.add_argument('--height', type=int, default=DEFAULT_HEIGHT, help='Display height in pixels')
-    parser.add_argument('--line-height', type=int, default=DEFAULT_LINE_HEIGHT, help='Pixels per text line for athlete rows')
-    parser.add_argument('--header-line-height', type=int, default=DEFAULT_HEADER_LINE_HEIGHT, help='Pixels per text line for header rows')
-    parser.add_argument('--header-rows', type=int, default=1, help='Number of rows for header (allows text wrapping)')
-    parser.add_argument('--interval', type=float, default=DEFAULT_INTERVAL, help='Seconds per page when paging')
-    parser.add_argument('--once', action='store_true', help='Render once then exit')
-    parser.add_argument('--chain', type=int, default=2, help='Panels chained horizontally')
-    parser.add_argument('--parallel', type=int, default=4, help='Panels stacked vertically')
-    parser.add_argument('--gpio-slowdown', type=int, default=3, help='GPIO slowdown for RGBMatrixOptions')
-    parser.add_argument('--fpp', action='store_true', help='Use FPP output instead of direct matrix control')
-    parser.add_argument('--fpp-host', default=FPP_DEFAULT_HOST, help='FPP host IP address')
-    parser.add_argument('--fpp-port', type=int, default=FPP_DEFAULT_PORT, help='FPP DDP port')
-    parser.add_argument('--colorlight', action='store_true', help='Send frames directly to ColorLight 5A-75B via raw Ethernet (requires root/sudo)')
-    parser.add_argument('--colorlight-interface', default='eth0', help='Network interface name for ColorLight (e.g., eth0, enp0s3)')
-    parser.add_argument('--keyboard-device', help='Path to keyboard input device for evdev (e.g., /dev/input/event2). Auto-detect if not specified.')
+    parser.add_argument('--config-dir', default='./config', help='Path to configuration directory')
+    parser.add_argument('--file', '-f', default=lynx_file_path, help='Path to lynx.evt file')
+    parser.add_argument('--colors-csv', default=colors_file_path, help='Path to colors CSV file')
+    parser.add_argument('--event', type=int, default=current_event['event'], help='Event number')
+    parser.add_argument('--round', type=int, default=current_event['round'], help='Round number')
+    parser.add_argument('--heat', type=int, default=current_event['heat'], help='Heat number')
+    parser.add_argument('--font', default=fonts['font_path'], help='Path to BDF font for rgbmatrix')
+    parser.add_argument('--width', type=int, default=hw['width'], help='Display width in pixels')
+    parser.add_argument('--height', type=int, default=hw['height'], help='Display height in pixels')
+    parser.add_argument('--line-height', type=int, default=disp['line_height'], help='Pixels per text line for athlete rows')
+    parser.add_argument('--header-line-height', type=int, default=disp['header_line_height'], help='Pixels per text line for header rows')
+    parser.add_argument('--header-rows', type=int, default=disp['header_rows'], help='Number of rows for header (allows text wrapping)')
+    parser.add_argument('--interval', type=float, default=disp['interval'], help='Seconds per page when paging')
+    parser.add_argument('--once', action='store_true', default=behavior['once'], help='Render once then exit')
+    parser.add_argument('--chain', type=int, default=hw['chain'], help='Panels chained horizontally')
+    parser.add_argument('--parallel', type=int, default=hw['parallel'], help='Panels stacked vertically')
+    parser.add_argument('--gpio-slowdown', type=int, default=hw['gpio_slowdown'], help='GPIO slowdown for RGBMatrixOptions')
+    parser.add_argument('--fpp', action='store_true', default=net['fpp_enabled'], help='Use FPP output instead of direct matrix control')
+    parser.add_argument('--fpp-host', default=net['fpp_host'], help='FPP host IP address')
+    parser.add_argument('--fpp-port', type=int, default=net['fpp_port'], help='FPP DDP port')
+    parser.add_argument('--colorlight', action='store_true', default=net['colorlight_enabled'], help='Send frames directly to ColorLight 5A-75B via raw Ethernet (requires root/sudo)')
+    parser.add_argument('--colorlight-interface', default=net['colorlight_interface'], help='Network interface name for ColorLight (e.g., eth0, enp0s3)')
+    parser.add_argument('--keyboard-device', default=kbd['device_path'] or None, help='Path to keyboard input device for evdev (e.g., /dev/input/event2). Auto-detect if not specified.')
     args = parser.parse_args()
 
     try:
@@ -569,7 +596,7 @@ def main():
             should_continue = draw_event_on_matrix(event, matrix_classes, args.font, args.width, args.height,
                                  line_height=args.line_height, header_line_height=args.header_line_height,
                                  interval=args.interval, chain=args.chain, parallel=args.parallel,
-                                 gpio_slowdown=args.gpio_slowdown, once=args.once,
+                                 gpio_slowdown=args.gpio_slowdown, once=args.once, font_shift=disp['font_shift'],
                                  affiliation_colors=affiliation_colors, header_rows=args.header_rows)
 
             if should_continue or args.once:
