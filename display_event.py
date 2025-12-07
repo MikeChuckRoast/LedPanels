@@ -35,12 +35,24 @@ from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
                           parse_lynx_file)
 from matrix_backend import get_matrix_backend
 
+# Try to import keyboard handling library
+KEYBOARD_AVAILABLE = False
+keyboard_backend = None
+
 try:
-    from pynput import keyboard
+    # First try evdev (works on Linux without X server)
+    import evdev
+    from evdev import InputDevice, categorize, ecodes
+    keyboard_backend = 'evdev'
     KEYBOARD_AVAILABLE = True
 except ImportError:
-    KEYBOARD_AVAILABLE = False
-    logging.warning("pynput not available. Keyboard navigation disabled.")
+    try:
+        # Fall back to pynput (requires X server)
+        from pynput import keyboard
+        keyboard_backend = 'pynput'
+        KEYBOARD_AVAILABLE = True
+    except ImportError:
+        logging.warning("No keyboard library available (tried evdev, pynput). Keyboard navigation disabled.")
 
 # Default configuration
 DEFAULT_WIDTH = 128
@@ -300,8 +312,130 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
         return True
 
 
-def on_key_press(key):
-    """Handle keyboard events for heat navigation."""
+def find_keyboard_device():
+    """Find a keyboard input device using evdev.
+
+    Prioritizes keyboards with Page Up/Down keys, then full keyboards, then any keyboard-like device.
+    """
+    try:
+        all_devices = evdev.list_devices()
+        logging.info("Scanning for keyboard devices... found %d input devices", len(all_devices))
+
+        devices = [evdev.InputDevice(path) for path in all_devices]
+
+        # Categorize candidates by priority
+        best_candidates = []  # Has Page Up/Down
+        good_candidates = []  # Full keyboard (has letters)
+        basic_candidates = [] # Has Enter/Space
+
+        for device in devices:
+            # Skip devices with "hdmi" in the name (HDMI audio/CEC devices)
+            if "hdmi" in device.name.lower():
+                logging.info("Device: %s [%s] - SKIPPED (HDMI device)", device.name, device.path)
+                continue
+
+            # Look for devices with keyboard capabilities
+            capabilities = device.capabilities(verbose=False)
+            if ecodes.EV_KEY in capabilities:
+                # Check if it has common keyboard keys
+                keys = capabilities[ecodes.EV_KEY]
+                has_enter = ecodes.KEY_ENTER in keys
+                has_space = ecodes.KEY_SPACE in keys
+                has_pageup = ecodes.KEY_PAGEUP in keys
+                has_pagedown = ecodes.KEY_PAGEDOWN in keys
+                has_letters = ecodes.KEY_A in keys and ecodes.KEY_Z in keys
+
+                logging.info("Device: %s [%s] - ENTER:%s SPACE:%s PAGEUP:%s PAGEDOWN:%s LETTERS:%s",
+                             device.name, device.path, has_enter, has_space,
+                             has_pageup, has_pagedown, has_letters)
+
+                # Prioritize keyboards with Page Up/Down since that's what we need
+                if has_pageup and has_pagedown:
+                    best_candidates.append(device)
+                    logging.info("  -> BEST candidate (has Page Up/Down)")
+                elif has_letters:
+                    good_candidates.append(device)
+                    logging.info("  -> GOOD candidate (full keyboard)")
+                elif has_enter or has_space:
+                    basic_candidates.append(device)
+                    logging.info("  -> BASIC candidate (has Enter/Space)")
+
+        # Select the best available device
+        if best_candidates:
+            device = best_candidates[0]
+            logging.info("Selected BEST keyboard: %s at %s", device.name, device.path)
+            return device
+        elif good_candidates:
+            device = good_candidates[0]
+            logging.info("Selected GOOD keyboard: %s at %s", device.name, device.path)
+            return device
+        elif basic_candidates:
+            device = basic_candidates[0]
+            logging.info("Selected BASIC keyboard: %s at %s", device.name, device.path)
+            return device
+
+        logging.warning("No keyboard device found among %d input devices", len(devices))
+        logging.warning("Try running with: sudo python3 test_keyboard.py to debug")
+        logging.warning("Or specify device manually with: --keyboard-device /dev/input/eventX")
+        return None
+    except Exception as e:
+        logging.error("Error finding keyboard device: %s", e)
+        import traceback
+        logging.error(traceback.format_exc())
+        return None
+
+
+def evdev_keyboard_listener(device_path=None):
+    """Listen for keyboard events using evdev (runs in separate thread).
+
+    Args:
+        device_path: Optional path to specific input device (e.g., '/dev/input/event2')
+    """
+    global heat_change_request
+
+    if device_path:
+        try:
+            device = evdev.InputDevice(device_path)
+            logging.info("Using specified keyboard device: %s at %s", device.name, device.path)
+        except Exception as e:
+            logging.error("Failed to open specified device %s: %s", device_path, e)
+            return
+    else:
+        device = find_keyboard_device()
+        if not device:
+            logging.warning("Could not start evdev keyboard listener - no device found")
+            return
+
+    logging.info("Keyboard listener started (evdev) - monitoring %s", device.path)
+    logging.info("Waiting for key presses... (Page Up, Page Down, Period)")
+    try:
+        for event in device.read_loop():
+            if event.type == ecodes.EV_KEY:
+                key_event = categorize(event)
+                # Only handle key down events (not key up)
+                if key_event.keystate == 1:  # Key down
+                    logging.info("Key event detected: %s", key_event.keycode)
+
+                    if key_event.keycode == 'KEY_PAGEDOWN':
+                        with heat_change_lock:
+                            heat_change_request = 'next'
+                        logging.info(">>> Page Down pressed - next heat requested")
+                    elif key_event.keycode == 'KEY_PAGEUP':
+                        with heat_change_lock:
+                            heat_change_request = 'prev'
+                        logging.info(">>> Page Up pressed - previous heat requested")
+                    elif key_event.keycode == 'KEY_DOT':
+                        with heat_change_lock:
+                            heat_change_request = 'reset'
+                        logging.info(">>> Period pressed - reset to original heat requested")
+    except Exception as e:
+        logging.error("Keyboard listener error: %s", e)
+        import traceback
+        logging.error(traceback.format_exc())
+
+
+def on_key_press_pynput(key):
+    """Handle keyboard events for heat navigation using pynput."""
     global heat_change_request
 
     # Debug: log all key presses
@@ -355,6 +489,7 @@ def main():
     parser.add_argument('--fpp-port', type=int, default=FPP_DEFAULT_PORT, help='FPP DDP port')
     parser.add_argument('--colorlight', action='store_true', help='Send frames directly to ColorLight 5A-75B via raw Ethernet (requires root/sudo)')
     parser.add_argument('--colorlight-interface', default='eth0', help='Network interface name for ColorLight (e.g., eth0, enp0s3)')
+    parser.add_argument('--keyboard-device', help='Path to keyboard input device for evdev (e.g., /dev/input/event2). Auto-detect if not specified.')
     args = parser.parse_args()
 
     try:
@@ -368,10 +503,21 @@ def main():
 
     # Start keyboard listener if available
     keyboard_listener = None
+    keyboard_thread = None
     if KEYBOARD_AVAILABLE:
-        keyboard_listener = keyboard.Listener(on_press=on_key_press)
-        keyboard_listener.start()
-        logging.info("Keyboard navigation enabled: Page Down (next heat), Page Up (prev heat), Period (reset)")
+        if keyboard_backend == 'evdev':
+            # Start evdev listener in a separate thread
+            keyboard_thread = threading.Thread(
+                target=evdev_keyboard_listener,
+                args=(args.keyboard_device,),
+                daemon=True
+            )
+            keyboard_thread.start()
+            logging.info("Keyboard navigation enabled (evdev): Page Down (next heat), Page Up (prev heat), Period (reset)")
+        elif keyboard_backend == 'pynput':
+            keyboard_listener = keyboard.Listener(on_press=on_key_press_pynput)
+            keyboard_listener.start()
+            logging.info("Keyboard navigation enabled (pynput): Page Down (next heat), Page Up (prev heat), Period (reset)")
 
     # Store original heat number
     original_heat = args.heat
