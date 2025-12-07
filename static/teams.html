@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LED Display Control - Team Settings</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="container">
+        <h1>LED Display Control Panel</h1>
+        <nav>
+          <a href="/">Status</a>
+          <a href="/teams" class="active">Team Settings</a>
+          <a href="/display">Display Settings</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="container">
+      <div id="alert-container"></div>
+
+      <div class="card">
+        <h2>Team Color Settings</h2>
+        <p style="margin-bottom: 15px; color: #7f8c8d">
+          Configure team colors for the display. Changes will take effect
+          immediately.
+        </p>
+
+        <div style="margin-bottom: 15px">
+          <button class="btn btn-primary" onclick="addTeam()">Add Team</button>
+          <button class="btn btn-success" onclick="saveTeams()">
+            Save Changes
+          </button>
+        </div>
+
+        <div id="teams-container">
+          <div class="loading">Loading teams...</div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let teams = [];
+
+      async function fetchAPI(endpoint) {
+        const response = await fetch(endpoint);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return await response.json();
+      }
+
+      async function postAPI(endpoint, data) {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || `HTTP ${response.status}`);
+        }
+        return await response.json();
+      }
+
+      function showAlert(message, type = "success") {
+        const container = document.getElementById("alert-container");
+        const alertClass = type === "success" ? "alert-success" : "alert-error";
+        container.innerHTML = `<div class="alert ${alertClass}">${message}</div>`;
+        setTimeout(() => {
+          container.innerHTML = "";
+        }, 5000);
+      }
+
+      function renderTeams() {
+        const container = document.getElementById("teams-container");
+
+        if (teams.length === 0) {
+          container.innerHTML =
+            '<p>No teams configured. Click "Add Team" to create one.</p>';
+          return;
+        }
+
+        const tableHTML = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Affiliation</th>
+                            <th>Display Name</th>
+                            <th>Background Color</th>
+                            <th>Text Color</th>
+                            <th>Preview</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${teams
+                          .map(
+                            (team, index) => `
+                            <tr>
+                                <td>
+                                    <input type="text" value="${escapeHtml(
+                                      team.affiliation
+                                    )}" 
+                                           onchange="updateTeam(${index}, 'affiliation', this.value)"
+                                           style="width: 100%;" required>
+                                </td>
+                                <td>
+                                    <input type="text" value="${escapeHtml(
+                                      team.name
+                                    )}" 
+                                           onchange="updateTeam(${index}, 'name', this.value)"
+                                           style="width: 100%;">
+                                </td>
+                                <td>
+                                    <input type="color" value="${team.bgcolor}" 
+                                           onchange="updateTeam(${index}, 'bgcolor', this.value)">
+                                    <input type="text" value="${team.bgcolor}" 
+                                           onchange="updateTeam(${index}, 'bgcolor', this.value)"
+                                           style="width: 80px; margin-left: 5px;" pattern="#[0-9a-fA-F]{6}">
+                                </td>
+                                <td>
+                                    <input type="color" value="${team.text}" 
+                                           onchange="updateTeam(${index}, 'text', this.value)">
+                                    <input type="text" value="${team.text}" 
+                                           onchange="updateTeam(${index}, 'text', this.value)"
+                                           style="width: 80px; margin-left: 5px;" pattern="#[0-9a-fA-F]{6}">
+                                </td>
+                                <td>
+                                    <div style="background-color: ${
+                                      team.bgcolor
+                                    }; color: ${team.text}; 
+                                                padding: 5px 10px; border-radius: 3px; text-align: center; 
+                                                font-weight: 500; min-width: 80px;">
+                                        ${escapeHtml(
+                                          team.name || team.affiliation
+                                        )}
+                                    </div>
+                                </td>
+                                <td>
+                                    <button class="btn btn-danger btn-small" onclick="deleteTeam(${index})">Delete</button>
+                                </td>
+                            </tr>
+                        `
+                          )
+                          .join("")}
+                    </tbody>
+                </table>
+            `;
+
+        container.innerHTML = tableHTML;
+      }
+
+      function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      function updateTeam(index, field, value) {
+        teams[index][field] = value;
+        renderTeams();
+      }
+
+      function addTeam() {
+        teams.push({
+          affiliation: "New Team",
+          name: "",
+          bgcolor: "#0000aa",
+          text: "#ffffff",
+        });
+        renderTeams();
+      }
+
+      function deleteTeam(index) {
+        if (confirm("Are you sure you want to delete this team?")) {
+          teams.splice(index, 1);
+          renderTeams();
+        }
+      }
+
+      async function loadTeams() {
+        try {
+          const data = await fetchAPI("/api/teams");
+          teams = data.teams;
+          renderTeams();
+        } catch (error) {
+          document.getElementById(
+            "teams-container"
+          ).innerHTML = `<div class="alert alert-error">Error loading teams: ${error.message}</div>`;
+        }
+      }
+
+      async function saveTeams() {
+        // Validate teams
+        for (let i = 0; i < teams.length; i++) {
+          const team = teams[i];
+          if (!team.affiliation.trim()) {
+            showAlert(`Team ${i + 1}: Affiliation cannot be empty`, "error");
+            return;
+          }
+
+          // Validate color format
+          const colorRegex = /^#[0-9a-fA-F]{6}$/;
+          if (!colorRegex.test(team.bgcolor)) {
+            showAlert(
+              `Team ${i + 1} (${
+                team.affiliation
+              }): Invalid background color format. Use #RRGGBB`,
+              "error"
+            );
+            return;
+          }
+          if (!colorRegex.test(team.text)) {
+            showAlert(
+              `Team ${i + 1} (${
+                team.affiliation
+              }): Invalid text color format. Use #RRGGBB`,
+              "error"
+            );
+            return;
+          }
+        }
+
+        try {
+          await postAPI("/api/teams", { teams });
+          showAlert(`Successfully saved ${teams.length} team(s)!`);
+        } catch (error) {
+          showAlert(`Error saving teams: ${error.message}`, "error");
+        }
+      }
+
+      // Initialize on page load
+      document.addEventListener("DOMContentLoaded", () => {
+        loadTeams();
+      });
+    </script>
+  </body>
+</html>

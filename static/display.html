@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LED Display Control - Display Settings</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="container">
+        <h1>LED Display Control Panel</h1>
+        <nav>
+          <a href="/">Status</a>
+          <a href="/teams">Team Settings</a>
+          <a href="/display" class="active">Display Settings</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="container">
+      <div id="alert-container"></div>
+
+      <div class="card">
+        <h2>Display Configuration</h2>
+        <p style="margin-bottom: 20px; color: #7f8c8d">
+          Adjust display layout and timing settings. Changes will take effect on
+          next event reload.
+        </p>
+
+        <form id="display-form">
+          <div class="grid">
+            <div class="form-group">
+              <label for="line_height">
+                Line Height (pixels)
+                <span style="color: #7f8c8d; font-size: 12px"
+                  >- Height of athlete rows</span
+                >
+              </label>
+              <input
+                type="number"
+                id="line_height"
+                name="line_height"
+                min="1"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="header_line_height">
+                Header Line Height (pixels)
+                <span style="color: #7f8c8d; font-size: 12px"
+                  >- Height of header rows</span
+                >
+              </label>
+              <input
+                type="number"
+                id="header_line_height"
+                name="header_line_height"
+                min="1"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="header_rows">
+                Header Rows
+                <span style="color: #7f8c8d; font-size: 12px"
+                  >- Number of header rows for text wrapping</span
+                >
+              </label>
+              <input
+                type="number"
+                id="header_rows"
+                name="header_rows"
+                min="1"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="interval">
+                Page Interval (seconds)
+                <span style="color: #7f8c8d; font-size: 12px"
+                  >- Time per page when paging</span
+                >
+              </label>
+              <input
+                type="number"
+                id="interval"
+                name="interval"
+                min="0.1"
+                step="0.1"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="font_shift">
+                Font Shift (pixels)
+                <span style="color: #7f8c8d; font-size: 12px"
+                  >- Vertical font positioning adjustment</span
+                >
+              </label>
+              <input type="number" id="font_shift" name="font_shift" required />
+            </div>
+          </div>
+
+          <div style="margin-top: 20px">
+            <button type="submit" class="btn btn-success">Save Settings</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              onclick="loadSettings()"
+            >
+              Reset to Current
+            </button>
+          </div>
+        </form>
+
+        <div
+          style="
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+          "
+        >
+          <h3 style="font-size: 16px; margin-bottom: 10px">
+            Setting Descriptions:
+          </h3>
+          <ul style="margin-left: 20px; color: #7f8c8d; font-size: 14px">
+            <li>
+              <strong>Line Height:</strong> Pixel height for each athlete row
+              (e.g., 24 pixels)
+            </li>
+            <li>
+              <strong>Header Line Height:</strong> Pixel height for header rows
+              (e.g., 16 pixels)
+            </li>
+            <li>
+              <strong>Header Rows:</strong> Number of rows for the header
+              (allows text wrapping for long event names)
+            </li>
+            <li>
+              <strong>Page Interval:</strong> Seconds to display each page
+              before rotating to next (e.g., 2.0)
+            </li>
+            <li>
+              <strong>Font Shift:</strong> Vertical offset adjustment for font
+              positioning (e.g., 7)
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      async function fetchAPI(endpoint) {
+        const response = await fetch(endpoint);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return await response.json();
+      }
+
+      async function postAPI(endpoint, data) {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || `HTTP ${response.status}`);
+        }
+        return await response.json();
+      }
+
+      function showAlert(message, type = "success") {
+        const container = document.getElementById("alert-container");
+        const alertClass = type === "success" ? "alert-success" : "alert-error";
+        container.innerHTML = `<div class="alert ${alertClass}">${message}</div>`;
+        setTimeout(() => {
+          container.innerHTML = "";
+        }, 5000);
+      }
+
+      async function loadSettings() {
+        try {
+          const data = await fetchAPI("/api/display_settings");
+          const display = data.display;
+
+          // Populate form fields
+          document.getElementById("line_height").value =
+            display.line_height || "";
+          document.getElementById("header_line_height").value =
+            display.header_line_height || "";
+          document.getElementById("header_rows").value =
+            display.header_rows || "";
+          document.getElementById("interval").value = display.interval || "";
+          document.getElementById("font_shift").value =
+            display.font_shift || "";
+        } catch (error) {
+          showAlert(
+            `Error loading display settings: ${error.message}`,
+            "error"
+          );
+        }
+      }
+
+      async function saveSettings(event) {
+        event.preventDefault();
+
+        const formData = new FormData(event.target);
+        const display = {};
+
+        // Convert form data to object with proper types
+        display.line_height = parseInt(formData.get("line_height"));
+        display.header_line_height = parseInt(
+          formData.get("header_line_height")
+        );
+        display.header_rows = parseInt(formData.get("header_rows"));
+        display.interval = parseFloat(formData.get("interval"));
+        display.font_shift = parseInt(formData.get("font_shift"));
+
+        // Validate
+        if (
+          display.line_height <= 0 ||
+          display.header_line_height <= 0 ||
+          display.header_rows <= 0 ||
+          display.interval <= 0
+        ) {
+          showAlert("All values must be positive numbers", "error");
+          return;
+        }
+
+        try {
+          await postAPI("/api/display_settings", { display });
+          showAlert("Display settings saved successfully!");
+        } catch (error) {
+          showAlert(`Error saving settings: ${error.message}`, "error");
+        }
+      }
+
+      // Initialize on page load
+      document.addEventListener("DOMContentLoaded", () => {
+        loadSettings();
+        document
+          .getElementById("display-form")
+          .addEventListener("submit", saveSettings);
+      });
+    </script>
+  </body>
+</html>

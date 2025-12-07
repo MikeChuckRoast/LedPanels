@@ -99,6 +99,12 @@ once = false  # Render once and exit vs. continuous loop
 # File monitoring for automatic reload
 file_watch_enabled = true    # Enable automatic file monitoring (requires watchdog library)
 poll_interval = 1.0          # Polling interval in seconds (fallback mode only)
+
+[web]
+# Web interface for remote control and configuration
+web_enabled = true           # Enable web interface
+web_host = "0.0.0.0"          # Host to bind to (0.0.0.0 = all interfaces)
+web_port = 5000              # Port for web server
 """
         try:
             with open(settings_path, "w", encoding="utf-8") as f:
@@ -209,6 +215,17 @@ def load_settings(config_dir: str) -> Dict[str, Any]:
             _validate_bool(monitoring, "file_watch_enabled", "monitoring")
         if "poll_interval" in monitoring:
             _validate_positive_float(monitoring, "poll_interval", "monitoring")
+
+    # Validate web (optional section for backward compatibility)
+    if "web" in settings:
+        web = settings["web"]
+        if "web_enabled" in web:
+            _validate_bool(web, "web_enabled", "web")
+        if "web_host" in web:
+            if not isinstance(web["web_host"], str):
+                raise ConfigError("web.web_host must be a string")
+        if "web_port" in web:
+            _validate_port(web, "web_port", "web")
 
     # Log loaded configuration
     logging.info("Configuration loaded successfully:")

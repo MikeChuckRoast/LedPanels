@@ -38,6 +38,7 @@ from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
                           parse_lynx_file)
 from file_watcher import start_file_watcher
 from matrix_backend import get_matrix_backend
+from web_server import start_web_server
 
 # Try to import keyboard handling library
 KEYBOARD_AVAILABLE = False
@@ -577,6 +578,17 @@ def main():
         global file_reload_requested
         with file_reload_lock:
             file_reload_requested = True
+
+    # Start web server if enabled
+    web_server = None
+    if settings.get('web', {}).get('web_enabled', False):
+        web_host = settings.get('web', {}).get('web_host', '0.0.0.0')
+        web_port = settings.get('web', {}).get('web_port', 5000)
+        web_server = start_web_server(config_dir, web_host, web_port)
+        if web_server:
+            logging.info(f"Web interface available at http://{web_host}:{web_port}")
+        else:
+            logging.warning("Web server could not be started")
 
     # Start file watcher
     file_watcher = None

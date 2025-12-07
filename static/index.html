@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LED Display Control - Status</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="container">
+        <h1>LED Display Control Panel</h1>
+        <nav>
+          <a href="/" class="active">Status</a>
+          <a href="/teams">Team Settings</a>
+          <a href="/display">Display Settings</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="container">
+      <div id="alert-container"></div>
+
+      <div class="grid">
+        <div class="card">
+          <h2>Current Event</h2>
+          <div id="current-event-info">
+            <div class="loading">Loading...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Available Events</h2>
+        <div id="events-list">
+          <div class="loading">Loading events...</div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // API helper functions
+      async function fetchAPI(endpoint) {
+        const response = await fetch(endpoint);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return await response.json();
+      }
+
+      async function postAPI(endpoint, data) {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || `HTTP ${response.status}`);
+        }
+        return await response.json();
+      }
+
+      function showAlert(message, type = "success") {
+        const container = document.getElementById("alert-container");
+        const alertClass = type === "success" ? "alert-success" : "alert-error";
+        container.innerHTML = `<div class="alert ${alertClass}">${message}</div>`;
+        setTimeout(() => {
+          container.innerHTML = "";
+        }, 5000);
+      }
+
+      // Load current event
+      async function loadCurrentEvent() {
+        try {
+          const data = await fetchAPI("/api/current_event");
+          const info = document.getElementById("current-event-info");
+          info.innerHTML = `
+                    <div style="font-size: 18px; font-weight: 500; margin-bottom: 15px;">
+                        <span class="status-badge status-active">Active</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                        <div>
+                            <label style="font-weight: 500; color: #7f8c8d;">Event</label>
+                            <div style="font-size: 24px; font-weight: 600; color: var(--primary-color);">${data.event}</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 500; color: #7f8c8d;">Round</label>
+                            <div style="font-size: 24px; font-weight: 600; color: var(--primary-color);">${data.round}</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 500; color: #7f8c8d;">Heat</label>
+                            <div style="font-size: 24px; font-weight: 600; color: var(--primary-color);">${data.heat}</div>
+                        </div>
+                    </div>
+                `;
+          return data;
+        } catch (error) {
+          document.getElementById(
+            "current-event-info"
+          ).innerHTML = `<div class="alert alert-error">Error loading current event: ${error.message}</div>`;
+          return null;
+        }
+      }
+
+      // Load events list
+      async function loadEvents() {
+        try {
+          const data = await fetchAPI("/api/events");
+          const currentEvent = await loadCurrentEvent();
+
+          const container = document.getElementById("events-list");
+
+          if (data.events.length === 0) {
+            container.innerHTML = "<p>No events found in lynx.evt file.</p>";
+            return;
+          }
+
+          const eventsHTML = data.events
+            .map((event) => {
+              const isActive =
+                currentEvent &&
+                event.event === currentEvent.event &&
+                event.round === currentEvent.round &&
+                event.heat === currentEvent.heat;
+
+              return `
+                        <div class="event-item ${isActive ? "active" : ""}" 
+                             onclick="selectEvent(${event.event}, ${
+                event.round
+              }, ${event.heat})">
+                            <div class="event-header">
+                                Event ${event.event} - Round ${
+                event.round
+              } - Heat ${event.heat}
+                            </div>
+                            <div style="margin-top: 5px; font-weight: 500;">${
+                              event.name
+                            }</div>
+                            <div class="event-details">
+                                ${event.athlete_count} athlete${
+                event.athlete_count !== 1 ? "s" : ""
+              }
+                            </div>
+                        </div>
+                    `;
+            })
+            .join("");
+
+          container.innerHTML = `<div class="event-list">${eventsHTML}</div>`;
+        } catch (error) {
+          document.getElementById(
+            "events-list"
+          ).innerHTML = `<div class="alert alert-error">Error loading events: ${error.message}</div>`;
+        }
+      }
+
+      // Select event
+      async function selectEvent(event, round, heat) {
+        try {
+          await postAPI("/api/current_event", { event, round, heat });
+          showAlert(
+            `Event ${event}, Round ${round}, Heat ${heat} selected successfully!`
+          );
+          // Reload to update UI
+          await loadEvents();
+        } catch (error) {
+          showAlert(`Error selecting event: ${error.message}`, "error");
+        }
+      }
+
+      // Initialize on page load
+      document.addEventListener("DOMContentLoaded", () => {
+        loadEvents();
+      });
+    </script>
+  </body>
+</html>

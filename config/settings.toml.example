@@ -62,3 +62,11 @@ once = false  # If true, render once and exit; if false, loop continuously with 
 # When files change, the display automatically reloads the new data
 file_watch_enabled = true    # Enable automatic file monitoring (requires watchdog library)
 poll_interval = 1.0          # Polling interval in seconds (fallback mode only)
+
+[web]
+# Web interface for remote control and configuration
+# Access from any browser on the network: http://<raspberry-pi-ip>:5000
+# Provides pages for viewing/changing current event, editing team colors, and adjusting display settings
+web_enabled = true           # Enable web interface
+web_host = "0.0.0.0"          # Host to bind to (0.0.0.0 = all interfaces, 127.0.0.1 = localhost only)
+web_port = 5000              # Port for web server (default HTTP alternative: 5000)
