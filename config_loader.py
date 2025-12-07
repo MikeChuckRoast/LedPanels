@@ -94,6 +94,11 @@ device_path = ""
 [behavior]
 # Runtime behavior
 once = false  # Render once and exit vs. continuous loop
+
+[monitoring]
+# File monitoring for automatic reload
+file_watch_enabled = true    # Enable automatic file monitoring (requires watchdog library)
+poll_interval = 1.0          # Polling interval in seconds (fallback mode only)
 """
         try:
             with open(settings_path, "w", encoding="utf-8") as f:
@@ -129,7 +134,7 @@ def load_settings(config_dir: str) -> Dict[str, Any]:
     except Exception as e:
         raise ConfigError(f"Failed to load settings file: {e}")
 
-    # Validate required sections
+    # Validate required sections (monitoring is optional)
     required_sections = ["hardware", "display", "fonts", "files", "network", "keyboard", "behavior"]
     missing_sections = [s for s in required_sections if s not in settings]
     if missing_sections:
@@ -196,6 +201,14 @@ def load_settings(config_dir: str) -> Dict[str, Any]:
     # Validate behavior
     behavior = settings["behavior"]
     _validate_bool(behavior, "once", "behavior")
+
+    # Validate monitoring (optional section for backward compatibility)
+    if "monitoring" in settings:
+        monitoring = settings["monitoring"]
+        if "file_watch_enabled" in monitoring:
+            _validate_bool(monitoring, "file_watch_enabled", "monitoring")
+        if "poll_interval" in monitoring:
+            _validate_positive_float(monitoring, "poll_interval", "monitoring")
 
     # Log loaded configuration
     logging.info("Configuration loaded successfully:")

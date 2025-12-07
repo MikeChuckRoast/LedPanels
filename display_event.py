@@ -36,6 +36,7 @@ from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
                           format_athlete_line, is_relay_event,
                           load_affiliation_colors, paginate_items,
                           parse_lynx_file)
+from file_watcher import start_file_watcher
 from matrix_backend import get_matrix_backend
 
 # Try to import keyboard handling library
@@ -60,6 +61,10 @@ except ImportError:
 # Global state for keyboard navigation
 heat_change_lock = threading.Lock()
 heat_change_request = None  # None, 'next', 'prev', or 'reset'
+
+# Global state for file reload monitoring
+file_reload_lock = threading.Lock()
+file_reload_requested = False
 
 
 # Note: Parsing and formatting functions moved to event_parser.py
@@ -285,14 +290,20 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
         while True:
             render_page(page_idx)
 
-            # Sleep in small increments to check for heat changes more frequently
+            # Sleep in small increments to check for heat changes and file reloads
             elapsed = 0.0
             check_interval = 0.1  # Check every 100ms for better responsiveness
             while elapsed < interval:
                 # Check for heat change request
-                global heat_change_request
+                global heat_change_request, file_reload_requested
                 with heat_change_lock:
                     if heat_change_request is not None:
+                        matrix.Clear()
+                        return False  # Signal to reload
+
+                # Check for file reload request
+                with file_reload_lock:
+                    if file_reload_requested:
                         matrix.Clear()
                         return False  # Signal to reload
 
@@ -459,6 +470,34 @@ def on_key_press_pynput(key):
         pass
 
 
+def load_file_with_retry(load_func, file_description: str, max_retries: int = 3):
+    """Load a file with retry logic to handle files being written.
+
+    Args:
+        load_func: Function to call to load the file (no arguments)
+        file_description: Description of file for error messages
+        max_retries: Maximum number of retry attempts
+
+    Returns:
+        Result from load_func, or None if all retries failed
+    """
+    for attempt in range(max_retries):
+        try:
+            return load_func()
+        except (IOError, OSError, FileNotFoundError) as e:
+            if attempt < max_retries - 1:
+                delay = 0.1 * (attempt + 1)
+                logging.warning(f"Failed to load {file_description} (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                logging.error(f"Failed to load {file_description} after {max_retries} attempts: {e}")
+                return None
+        except Exception as e:
+            logging.error(f"Unexpected error loading {file_description}: {e}")
+            return None
+    return None
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
@@ -533,6 +572,21 @@ def main():
     # Load affiliation colors
     affiliation_colors = load_affiliation_colors(args.colors_csv)
 
+    # File reload callback for file watcher
+    def request_file_reload():
+        global file_reload_requested
+        with file_reload_lock:
+            file_reload_requested = True
+
+    # Start file watcher
+    file_watcher = None
+    if not args.__dict__.get('no_file_watch', False):  # Check if flag exists
+        file_watcher = start_file_watcher(config_dir, request_file_reload)
+        if file_watcher:
+            logging.info("File monitoring enabled for auto-reload")
+        else:
+            logging.warning("File monitoring could not be started - manual restart required for file changes")
+
     # Start keyboard listener if available
     keyboard_listener = None
     keyboard_thread = None
@@ -572,7 +626,7 @@ def main():
             logging.error("No rgbmatrix backend available: install 'rgbmatrix' or an emulator module named 'RGBMatrixEmulator' or 'rgbmatrix_emulator', or use --fpp for network output")
         sys.exit(4)
 
-    # Main loop - allows reloading when heat changes
+    # Main loop - allows reloading when heat changes or files change
     try:
         while True:
             key = (args.event, args.round, current_heat)
@@ -602,8 +656,57 @@ def main():
             if should_continue or args.once:
                 break
 
+            # Check what triggered the reload
+            global heat_change_request, file_reload_requested
+            is_file_reload = False
+            with file_reload_lock:
+                if file_reload_requested:
+                    is_file_reload = True
+                    file_reload_requested = False
+
+            if is_file_reload:
+                # File reload requested - reload all data files
+                logging.info("Reloading event data from files...")
+
+                # Reload lynx.evt with retry logic
+                new_events = load_file_with_retry(
+                    lambda: parse_lynx_file(args.file),
+                    "lynx.evt"
+                )
+                if new_events is not None:
+                    events = new_events
+                else:
+                    logging.warning("Could not reload lynx.evt - continuing with current data")
+
+                # Reload current_event.json with retry logic
+                new_current_event = load_file_with_retry(
+                    lambda: load_current_event(config_dir),
+                    "current_event.json"
+                )
+                if new_current_event is not None:
+                    # Update current heat from reloaded file
+                    args.event = new_current_event['event']
+                    args.round = new_current_event['round']
+                    current_heat = new_current_event['heat']
+                    original_heat = current_heat
+                    logging.info(f"Updated to Event={args.event}, Round={args.round}, Heat={current_heat}")
+                else:
+                    logging.warning("Could not reload current_event.json - continuing with current event selection")
+
+                # Reload colors.csv with retry logic
+                new_colors = load_file_with_retry(
+                    lambda: load_affiliation_colors(args.colors_csv),
+                    "colors.csv"
+                )
+                if new_colors is not None:
+                    affiliation_colors = new_colors
+                else:
+                    logging.warning("Could not reload colors.csv - continuing with current colors")
+
+                logging.info("Reload complete - resuming display")
+                continue
+
             # Handle heat change request
-            global heat_change_request
             with heat_change_lock:
                 if heat_change_request == 'next':
                     # Try next heat

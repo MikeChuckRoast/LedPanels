@@ -55,3 +55,10 @@ device_path = ""
 [behavior]
 # Runtime behavior
 once = false  # If true, render once and exit; if false, loop continuously with paging
+
+[monitoring]
+# File monitoring for automatic reload
+# Monitors lynx.evt, current_event.json, and colors.csv for changes
+# When files change, the display automatically reloads the new data
+file_watch_enabled = true    # Enable automatic file monitoring (requires watchdog library)
+poll_interval = 1.0          # Polling interval in seconds (fallback mode only)
