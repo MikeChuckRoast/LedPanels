@@ -126,6 +126,10 @@
                 event.round === currentEvent.round &&
                 event.heat === currentEvent.heat;
 
+              const scheduleInfo = event.schedule_position 
+                ? `<span style="color: #3498db; font-weight: 500;"> (Position ${event.schedule_position} of ${event.total_scheduled})</span>` 
+                : '';
+
               return `
                         <div class="event-item ${isActive ? "active" : ""}" 
                              onclick="selectEvent(${event.event}, ${
@@ -134,7 +138,7 @@
                             <div class="event-header">
                                 Event ${event.event} - Round ${
                 event.round
-              } - Heat ${event.heat}
+              } - Heat ${event.heat}${scheduleInfo}
                             </div>
                             <div style="margin-top: 5px; font-weight: 500;">${
                               event.name

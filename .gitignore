@@ -212,6 +212,7 @@ emulator_config.json
 config/settings.toml
 config/current_event.json
 config/lynx.evt
+config/lynx.sch
 
 # ColorLight config files
 *.rcvbp

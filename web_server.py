@@ -21,6 +21,7 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from event_parser import (load_affiliation_colors, parse_hex_color,
                           parse_lynx_file)
+from schedule_parser import parse_schedule, validate_schedule_entries
 
 
 class WebServer:
@@ -104,18 +105,63 @@ class WebServer:
             lynx_file = self.config_dir / "lynx.evt"
             events = parse_lynx_file(str(lynx_file))
 
+            # Try to load schedule for ordering
+            schedule_path = self.config_dir / "lynx.sch"
+            schedule = []
+            if schedule_path.exists():
+                try:
+                    raw_schedule = parse_schedule(schedule_path)
+                    schedule = validate_schedule_entries(raw_schedule, events)
+                except Exception as e:
+                    logging.warning(f"Failed to load schedule for web API: {e}")
+
             # Convert to list format for JSON
             events_list = []
-            for (event_num, round_num, heat_num), event_data in sorted(events.items()):
-                events_list.append({
-                    'event': event_num,
-                    'round': round_num,
-                    'heat': heat_num,
-                    'name': event_data['name'],
-                    'athlete_count': len(event_data['athletes'])
-                })
+            scheduled_keys = set()
+            
+            if schedule:
+                # Add scheduled events in order with position numbers
+                for idx, (event_num, round_num, heat_num) in enumerate(schedule):
+                    key = (event_num, round_num, heat_num)
+                    scheduled_keys.add(key)
+                    event_data = events[key]
+                    events_list.append({
+                        'event': event_num,
+                        'round': round_num,
+                        'heat': heat_num,
+                        'name': event_data['name'],
+                        'athlete_count': len(event_data['athletes']),
+                        'schedule_position': idx + 1,
+                        'total_scheduled': len(schedule)
+                    })
+                
+                # Add unscheduled events at the end (sorted)
+                for (event_num, round_num, heat_num), event_data in sorted(events.items()):
+                    key = (event_num, round_num, heat_num)
+                    if key not in scheduled_keys:
+                        events_list.append({
+                            'event': event_num,
+                            'round': round_num,
+                            'heat': heat_num,
+                            'name': event_data['name'],
+                            'athlete_count': len(event_data['athletes']),
+                            'schedule_position': None,
+                            'total_scheduled': None
+                        })
+            else:
+                # No schedule - use default sorting
+                for (event_num, round_num, heat_num), event_data in sorted(events.items()):
+                    events_list.append({
+                        'event': event_num,
+                        'round': round_num,
+                        'heat': heat_num,
+                        'name': event_data['name'],
+                        'athlete_count': len(event_data['athletes']),
+                        'schedule_position': None,
+                        'total_scheduled': None
+                    })
 
-            return jsonify({'events': events_list}), 200
+            return jsonify({'events': events_list, 'has_schedule': len(schedule) > 0}), 200
         except FileNotFoundError:
             return jsonify({'error': 'lynx.evt file not found'}), 404
         except Exception as e:

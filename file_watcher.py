@@ -51,7 +51,7 @@ class ConfigFileHandler(FileSystemEventHandler):
         """
         # Monitor these files (case-insensitive on Windows)
         basename = os.path.basename(file_path).lower()
-        return basename in ['lynx.evt', 'current_event.json', 'colors.csv']
+        return basename in ['lynx.evt', 'current_event.json', 'colors.csv', 'lynx.sch']
 
     def on_modified(self, event: FileSystemEvent):
         """Handle file modification event.

@@ -38,6 +38,9 @@ from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
                           parse_lynx_file)
 from file_watcher import start_file_watcher
 from matrix_backend import get_matrix_backend
+from schedule_parser import (find_nearest_schedule_index, find_schedule_index,
+                            get_schedule_position_text, parse_schedule,
+                            validate_schedule_entries)
 from web_server import start_web_server
 
 # Try to import keyboard handling library
@@ -617,9 +620,37 @@ def main():
             keyboard_listener.start()
             logging.info("Keyboard navigation enabled (pynput): Page Down (next heat), Page Up (prev heat), Period (reset)")
 
-    # Store original heat number
+    # Load schedule file if available
+    schedule_path = os.path.join(config_dir, "lynx.sch")
+    schedule = parse_schedule(schedule_path)
+    if schedule:
+        # Validate schedule entries against loaded events
+        schedule = validate_schedule_entries(schedule, events)
+        if schedule:
+            # Find starting position in schedule
+            starting_schedule_index = find_schedule_index(schedule, args.event, args.round, args.heat)
+            if starting_schedule_index < 0:
+                # Current event not in schedule - find nearest
+                starting_schedule_index = find_nearest_schedule_index(schedule, args.event, args.round, args.heat)
+                if starting_schedule_index is None:
+                    logging.warning("Current event is past all scheduled events - using heat increment mode")
+                    schedule = []  # Disable schedule navigation
+                    starting_schedule_index = -1
+            logging.info(f"Schedule navigation enabled - starting at position {starting_schedule_index + 1} of {len(schedule)}")
+            logging.info(get_schedule_position_text(schedule, args.event, args.round, args.heat))
+        else:
+            logging.warning("No valid entries in schedule - using heat increment mode")
+            starting_schedule_index = -1
+    else:
+        logging.info("No schedule file - using heat increment mode for keyboard navigation")
+        starting_schedule_index = -1
+    
+    # Store original event/round/heat and current position
+    original_event = args.event
+    original_round = args.round
     original_heat = args.heat
     current_heat = args.heat
+    current_schedule_index = starting_schedule_index if schedule else -1
 
     # Get appropriate matrix backend (direct, emulator, FPP, or ColorLight)
     matrix_classes = get_matrix_backend(
@@ -715,34 +746,115 @@ def main():
                 else:
                     logging.warning("Could not reload colors.csv - continuing with current colors")
 
+                # Reload schedule (lynx.sch) if it exists
+                schedule_path = os.path.join(config_dir, "lynx.sch")
+                if os.path.exists(schedule_path):
+                    new_schedule = load_file_with_retry(
+                        lambda: parse_schedule(schedule_path),
+                        "lynx.sch"
+                    )
+                    if new_schedule is not None:
+                        # Validate against reloaded events
+                        validated_schedule = validate_schedule_entries(new_schedule, events)
+                        if validated_schedule:
+                            schedule = validated_schedule
+                            
+                            # Recalculate starting position based on reloaded current event
+                            starting_schedule_index = find_schedule_index(schedule, args.event, args.round, current_heat)
+                            if starting_schedule_index == -1:
+                                # Current event not in schedule, find nearest
+                                starting_schedule_index = find_nearest_schedule_index(
+                                    schedule, args.event, args.round, current_heat
+                                )
+                                if starting_schedule_index == -1:
+                                    # Current event is past all scheduled events
+                                    logging.warning("Current event is past all scheduled events - disabling schedule navigation")
+                                    schedule = []
+                                else:
+                                    evt, rnd, ht = schedule[starting_schedule_index]
+                                    position_text = get_schedule_position_text(schedule, evt, rnd, ht)
+                                    logging.info(f"Current event not in schedule - starting from nearest: {position_text}")
+                            else:
+                                evt, rnd, ht = schedule[starting_schedule_index]
+                                position_text = get_schedule_position_text(schedule, evt, rnd, ht)
+                                logging.info(f"Schedule reloaded - starting at: {position_text}")
+                            
+                            # Reset to new starting position
+                            if schedule:
+                                current_schedule_index = starting_schedule_index
+                                original_event = args.event
+                                original_round = args.round
+                                original_heat = current_heat
+                        else:
+                            logging.warning("No valid schedule entries after reload - disabling schedule navigation")
+                            schedule = []
+                    else:
+                        logging.warning("Could not reload lynx.sch - continuing with current schedule")
+                else:
+                    # Schedule file was deleted - disable schedule navigation
+                    if schedule:
+                        logging.info("Schedule file removed - switching to heat increment mode")
+                        schedule = []
+
                 logging.info("Reload complete - resuming display")
                 continue
 
             # Handle heat change request
             with heat_change_lock:
-                if heat_change_request == 'next':
-                    # Try next heat
-                    next_heat = current_heat + 1
-                    if (args.event, args.round, next_heat) in events:
-                        current_heat = next_heat
-                        logging.info("Switching to heat %d", current_heat)
-                    else:
-                        logging.info("No heat %d found, staying on heat %d", next_heat, current_heat)
-                elif heat_change_request == 'prev':
-                    # Try previous heat (minimum original_heat)
-                    prev_heat = max(original_heat, current_heat - 1)
-                    if prev_heat != current_heat and (args.event, args.round, prev_heat) in events:
-                        current_heat = prev_heat
-                        logging.info("Switching to heat %d", current_heat)
-                    else:
-                        logging.info("Cannot go to heat %d, staying on heat %d", prev_heat, current_heat)
-                elif heat_change_request == 'reset':
-                    # Reset to original heat
-                    if current_heat != original_heat:
-                        current_heat = original_heat
-                        logging.info("Resetting to original heat %d", current_heat)
-                    else:
-                        logging.info("Already at original heat %d", current_heat)
+                if schedule:
+                    # Schedule-based navigation
+                    if heat_change_request == 'next':
+                        if current_schedule_index < len(schedule) - 1:
+                            current_schedule_index += 1
+                            args.event, args.round, current_heat = schedule[current_schedule_index]
+                            position_text = get_schedule_position_text(schedule, args.event, args.round, current_heat)
+                            logging.info("Moving to next event: %s", position_text)
+                        else:
+                            logging.info("Already at last event in schedule (position %d of %d)", 
+                                       current_schedule_index + 1, len(schedule))
+                    elif heat_change_request == 'prev':
+                        if current_schedule_index > starting_schedule_index:
+                            current_schedule_index -= 1
+                            args.event, args.round, current_heat = schedule[current_schedule_index]
+                            position_text = get_schedule_position_text(schedule, args.event, args.round, current_heat)
+                            logging.info("Moving to previous event: %s", position_text)
+                        else:
+                            logging.info("Cannot go before starting event (position %d of %d)",
+                                       starting_schedule_index + 1, len(schedule))
+                    elif heat_change_request == 'reset':
+                        if current_schedule_index != starting_schedule_index:
+                            current_schedule_index = starting_schedule_index
+                            args.event, args.round, current_heat = schedule[current_schedule_index]
+                            position_text = get_schedule_position_text(schedule, args.event, args.round, current_heat)
+                            logging.info("Resetting to starting event: %s", position_text)
+                        else:
+                            position_text = get_schedule_position_text(schedule, args.event, args.round, current_heat)
+                            logging.info("Already at starting event: %s", position_text)
+                else:
+                    # Heat increment mode (fallback when no schedule)
+                    if heat_change_request == 'next':
+                        # Try next heat
+                        next_heat = current_heat + 1
+                        if (args.event, args.round, next_heat) in events:
+                            current_heat = next_heat
+                            logging.info("Switching to heat %d", current_heat)
+                        else:
+                            logging.info("No heat %d found, staying on heat %d", next_heat, current_heat)
+                    elif heat_change_request == 'prev':
+                        # Try previous heat (minimum original_heat)
+                        prev_heat = max(original_heat, current_heat - 1)
+                        if prev_heat != current_heat and (args.event, args.round, prev_heat) in events:
+                            current_heat = prev_heat
+                            logging.info("Switching to heat %d", current_heat)
+                        else:
+                            logging.info("Cannot go to heat %d, staying on heat %d", prev_heat, current_heat)
+                    elif heat_change_request == 'reset':
+                        # Reset to original heat
+                        if current_heat != original_heat:
+                            current_heat = original_heat
+                            logging.info("Resetting to original heat %d", current_heat)
+                        else:
+                            logging.info("Already at original heat %d", current_heat)
 
                 heat_change_request = None  # Clear the request
     except Exception as e:
