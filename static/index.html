@@ -126,9 +126,9 @@
                 event.round === currentEvent.round &&
                 event.heat === currentEvent.heat;
 
-              const scheduleInfo = event.schedule_position 
-                ? `<span style="color: #3498db; font-weight: 500;"> (Position ${event.schedule_position} of ${event.total_scheduled})</span>` 
-                : '';
+              const scheduleInfo = event.schedule_position
+                ? `<span style="color: #3498db; font-weight: 500;"> (Position ${event.schedule_position} of ${event.total_scheduled})</span>`
+                : "";
 
               return `
                         <div class="event-item ${isActive ? "active" : ""}" 

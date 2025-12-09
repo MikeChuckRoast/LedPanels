@@ -118,7 +118,7 @@ class WebServer:
             # Convert to list format for JSON
             events_list = []
             scheduled_keys = set()
-            
+
             if schedule:
                 # Add scheduled events in order with position numbers
                 for idx, (event_num, round_num, heat_num) in enumerate(schedule):
@@ -134,7 +134,7 @@ class WebServer:
                         'schedule_position': idx + 1,
                         'total_scheduled': len(schedule)
                     })
-                
+
                 # Add unscheduled events at the end (sorted)
                 for (event_num, round_num, heat_num), event_data in sorted(events.items()):
                     key = (event_num, round_num, heat_num)

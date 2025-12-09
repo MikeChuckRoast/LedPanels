@@ -39,8 +39,8 @@ from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
 from file_watcher import start_file_watcher
 from matrix_backend import get_matrix_backend
 from schedule_parser import (find_nearest_schedule_index, find_schedule_index,
-                            get_schedule_position_text, parse_schedule,
-                            validate_schedule_entries)
+                             get_schedule_position_text, parse_schedule,
+                             validate_schedule_entries)
 from web_server import start_web_server
 
 # Try to import keyboard handling library
@@ -644,7 +644,7 @@ def main():
     else:
         logging.info("No schedule file - using heat increment mode for keyboard navigation")
         starting_schedule_index = -1
-    
+
     # Store original event/round/heat and current position
     original_event = args.event
     original_round = args.round
@@ -758,7 +758,7 @@ def main():
                         validated_schedule = validate_schedule_entries(new_schedule, events)
                         if validated_schedule:
                             schedule = validated_schedule
-                            
+
                             # Recalculate starting position based on reloaded current event
                             starting_schedule_index = find_schedule_index(schedule, args.event, args.round, current_heat)
                             if starting_schedule_index == -1:
@@ -778,7 +778,7 @@ def main():
                                 evt, rnd, ht = schedule[starting_schedule_index]
                                 position_text = get_schedule_position_text(schedule, evt, rnd, ht)
                                 logging.info(f"Schedule reloaded - starting at: {position_text}")
-                            
+
                             # Reset to new starting position
                             if schedule:
                                 current_schedule_index = starting_schedule_index
@@ -810,7 +810,7 @@ def main():
                             position_text = get_schedule_position_text(schedule, args.event, args.round, current_heat)
                             logging.info("Moving to next event: %s", position_text)
                         else:
-                            logging.info("Already at last event in schedule (position %d of %d)", 
+                            logging.info("Already at last event in schedule (position %d of %d)",
                                        current_schedule_index + 1, len(schedule))
                     elif heat_change_request == 'prev':
                         if current_schedule_index > starting_schedule_index:
