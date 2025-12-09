@@ -150,6 +150,20 @@ class TestIsRelayEvent:
 
         assert result is True
 
+    def test_detects_relay_event_with_short_affiliation(self):
+        """Test detection of relay event with 2-character affiliation codes (e.g., 'ga')."""
+        athletes = [
+            {"first": "", "last": "Divine Child", "affiliation": "ddcm  A"},
+            {"first": "", "last": "Guardian Angels Catholic", "affiliation": "ga    A"},
+            {"first": "", "last": "Our Lady of Sorrows", "affiliation": "OLS   A"},
+            {"first": "", "last": "Notre Dame Marist Academy", "affiliation": "NDPM  A"},
+            {"first": "", "last": "Our Lady of Good Counsel", "affiliation": "olgc  A"}
+        ]
+
+        result = is_relay_event(athletes)
+
+        assert result is True
+
     def test_detects_individual_event(self):
         """Test detection of individual event from athlete data."""
         athletes = [

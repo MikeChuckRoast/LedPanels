@@ -147,7 +147,7 @@ def is_relay_event(athletes: List[Dict]) -> bool:
     Relay events have:
     - All first names empty
     - Last names matching pattern like 'Riverview' or 'Milan'
-    - Affiliation matching pattern like 'RICO  A' or 'MILA  A'
+    - Affiliation matching pattern like 'RICO  A' or 'ga    A' (2-4 letter codes)
     """
     if not athletes:
         return False
@@ -162,8 +162,8 @@ def is_relay_event(athletes: List[Dict]) -> bool:
         if first:
             return False
 
-        # Check if affiliation matches relay pattern (3-4 letters, spaces, then a letter)
-        if not re.match(r'^\w{3,4}\s+\w$', affil):
+        # Check if affiliation matches relay pattern (2-4 letters, spaces, then a letter)
+        if not re.match(r'^\w{2,4}\s+\w$', affil):
             return False
 
     return True
