@@ -135,6 +135,92 @@ class TestEventRendering:
         # Verify name format
 
 
+class TestRelayDuplicateSuffixDisplay:
+    """Tests for conditional relay suffix display based on team duplicates."""
+
+    def test_all_unique_relay_teams_no_suffix(self, relay_mixed_fixture):
+        """Test that relay teams with no duplicates show no suffix."""
+        from event_parser import get_duplicate_relay_teams, parse_lynx_file
+
+        events = parse_lynx_file(str(relay_mixed_fixture))
+        # Event 10 has all unique teams
+        event_data = events.get((10, 1, 1))
+        assert event_data is not None
+
+        athletes = event_data["athletes"]
+        duplicate_teams = get_duplicate_relay_teams(athletes)
+
+        # Should have no duplicates
+        assert len(duplicate_teams) == 0
+
+    def test_all_duplicate_relay_teams_show_suffix(self, relay_mixed_fixture):
+        """Test that all teams show suffix when all are duplicates."""
+        from event_parser import get_duplicate_relay_teams, parse_lynx_file
+
+        events = parse_lynx_file(str(relay_mixed_fixture))
+        # Event 11 has all duplicate teams
+        event_data = events.get((11, 1, 1))
+        assert event_data is not None
+
+        athletes = event_data["athletes"]
+        duplicate_teams = get_duplicate_relay_teams(athletes)
+
+        # Should identify both teams as duplicates
+        assert "divine child" in duplicate_teams
+        assert "guardian angels catholic" in duplicate_teams
+
+    def test_mixed_relay_teams_selective_suffix(self, relay_mixed_fixture):
+        """Test that only duplicate teams show suffix in mixed event."""
+        from event_parser import get_duplicate_relay_teams, parse_lynx_file
+
+        events = parse_lynx_file(str(relay_mixed_fixture))
+        # Event 12 has some duplicates: Divine Child appears twice, others once
+        event_data = events.get((12, 1, 1))
+        assert event_data is not None
+
+        athletes = event_data["athletes"]
+        duplicate_teams = get_duplicate_relay_teams(athletes)
+
+        # Only Divine Child should be marked as duplicate
+        assert "divine child" in duplicate_teams
+        assert "our lady of sorrows" not in duplicate_teams
+        assert "guardian angels catholic" not in duplicate_teams
+
+    def test_case_insensitive_duplicate_detection(self, relay_mixed_fixture):
+        """Test that duplicate detection is case-insensitive."""
+        from event_parser import get_duplicate_relay_teams, parse_lynx_file
+
+        events = parse_lynx_file(str(relay_mixed_fixture))
+        # Event 13 has "Divine Child", "divine child", "DIVINE CHILD"
+        event_data = events.get((13, 1, 1))
+        assert event_data is not None
+
+        athletes = event_data["athletes"]
+        duplicate_teams = get_duplicate_relay_teams(athletes)
+
+        # Should detect all three as the same team (case-insensitive)
+        assert "divine child" in duplicate_teams
+        assert len(duplicate_teams) == 1  # Only one unique team name
+
+    def test_three_same_teams_show_suffixes(self, relay_mixed_fixture):
+        """Test that teams appearing 3+ times all show suffixes."""
+        from event_parser import get_duplicate_relay_teams, parse_lynx_file
+
+        events = parse_lynx_file(str(relay_mixed_fixture))
+        # Event 14 has Divine Child A, B, C
+        event_data = events.get((14, 1, 1))
+        assert event_data is not None
+
+        athletes = event_data["athletes"]
+        duplicate_teams = get_duplicate_relay_teams(athletes)
+
+        # Divine Child should be marked as duplicate
+        assert "divine child" in duplicate_teams
+        # Other teams should not
+        assert "guardian angels catholic" not in duplicate_teams
+        assert "our lady of sorrows" not in duplicate_teams
+
+
 class TestFileWatching:
     """Tests for file watching and auto-reload functionality."""
 

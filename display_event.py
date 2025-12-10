@@ -33,9 +33,9 @@ from typing import Dict, List, Optional, Tuple
 from config_loader import (ConfigError, ensure_config_directory,
                            load_current_event, load_settings)
 from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
-                          format_athlete_line, is_relay_event,
-                          load_affiliation_colors, paginate_items,
-                          parse_lynx_file)
+                          format_athlete_line, get_duplicate_relay_teams,
+                          is_relay_event, load_affiliation_colors,
+                          paginate_items, parse_lynx_file)
 from file_watcher import start_file_watcher
 from matrix_backend import get_matrix_backend
 from schedule_parser import (find_nearest_schedule_index, find_schedule_index,
@@ -124,6 +124,11 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
     # Detect if this is a relay event (check original athletes list)
     is_relay = is_relay_event(athletes)
 
+    # For relay events, determine which teams appear multiple times (case-insensitive)
+    duplicate_teams = set()
+    if is_relay:
+        duplicate_teams = get_duplicate_relay_teams(athletes)
+
     # Colors
     white = graphics.Color(255, 255, 255)
     black = graphics.Color(0, 0, 0)
@@ -160,14 +165,6 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
     lane_col_width = max(lane_col_width, get_text_width("88"))  # at least space for two-digit lane
     lane_x = 1
     name_x = lane_x + lane_col_width + 3
-
-    # For relay events, reserve space on the right for suffix letter
-    suffix_col_width = 0
-    suffix_x = 0
-    if is_relay:
-        # Reserve space for suffix (e.g., "A", "B") plus padding
-        suffix_col_width = get_text_width("W") + 2  # Use 'W' as widest letter
-        suffix_x = canvas_width - suffix_col_width - 1
 
     def render_page(page_index: int):
         nonlocal canvas
@@ -255,13 +252,27 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
             # Only draw athlete info if there's an athlete in this lane
             if has_athlete:
                 if is_relay:
-                    # For relay: draw team name in middle, suffix on far right
+                    # For relay: draw team name, with suffix only if team has duplicates
                     # Use display_name from colors.csv if available, otherwise use last name
                     team_name = display_name if display_name else (athlete.get("last") or "").strip()
-                    suffix = extract_relay_suffix((athlete.get("affiliation") or "").strip())
 
-                    # Calculate available width for team name (between name_x and suffix column)
-                    available_width = suffix_x - name_x - 3  # Leave 3px gap before suffix
+                    # Check if this team appears multiple times (case-insensitive)
+                    # Use the original 'last' field for duplicate detection, not display_name
+                    original_team_name = (athlete.get("last") or "").strip().lower()
+                    has_duplicate = original_team_name in duplicate_teams
+
+                    if has_duplicate:
+                        # Team has duplicates - show suffix in right column
+                        suffix = extract_relay_suffix((athlete.get("affiliation") or "").strip())
+                        # Reserve space for suffix
+                        suffix_col_width = get_text_width("W") + 2  # Use 'W' as widest letter
+                        suffix_x = canvas_width - suffix_col_width - 1
+                        # Calculate available width for team name (between name_x and suffix column)
+                        available_width = suffix_x - name_x - 3  # Leave 3px gap before suffix
+                    else:
+                        # Team is unique - no suffix, use full width
+                        suffix = ""
+                        available_width = canvas_width - name_x - 1
 
                     # Truncate team name if needed to fit available space
                     team_name_width = get_text_width(team_name)
@@ -273,8 +284,9 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
                     # Draw team name in middle column
                     graphics.DrawText(canvas, font, name_x, y_txt, text_color, team_name)
 
-                    # Draw suffix in right column
-                    graphics.DrawText(canvas, font, suffix_x, y_txt, text_color, suffix)
+                    # Draw suffix in right column only if team has duplicates
+                    if has_duplicate and suffix:
+                        graphics.DrawText(canvas, font, suffix_x, y_txt, text_color, suffix)
                 else:
                     # For individual: draw name normally
                     name_txt = format_athlete_line(athlete, is_relay=False)

@@ -1,0 +1,25 @@
+10,1,1,Mixed Relay Test - All Unique Teams,,,,,,3200
+,,1,Divine Child,,ddcm  A,,,,,,,,38076
+,,2,Guardian Angels Catholic,,ga    A,,,,,,,,71635
+,,3,Our Lady of Sorrows,,OLS   A,,,,,,,,51899
+11,1,1,Mixed Relay Test - All Duplicate Teams,,,,,,3200
+,,1,Divine Child,,ddcm  A,,,,,,,,38076
+,,2,Divine Child,,ddcm  B,,,,,,,,38077
+,,3,Guardian Angels Catholic,,ga    A,,,,,,,,71635
+,,4,Guardian Angels Catholic,,ga    B,,,,,,,,71636
+12,1,1,Mixed Relay Test - Some Duplicates,,,,,,3200
+,,1,Divine Child,,ddcm  A,,,,,,,,38076
+,,2,Divine Child,,ddcm  B,,,,,,,,38077
+,,3,Our Lady of Sorrows,,OLS   A,,,,,,,,51899
+,,4,Guardian Angels Catholic,,ga    A,,,,,,,,71635
+13,1,1,Mixed Relay Test - Case Insensitive,,,,,,3200
+,,1,Divine Child,,ddcm  A,,,,,,,,38076
+,,2,divine child,,ddcm  B,,,,,,,,38077
+,,3,DIVINE CHILD,,ddcm  C,,,,,,,,38078
+,,4,Guardian Angels Catholic,,ga    A,,,,,,,,71635
+14,1,1,Mixed Relay Test - Three of Same Team,,,,,,3200
+,,1,Divine Child,,ddcm  A,,,,,,,,38076
+,,2,Divine Child,,ddcm  B,,,,,,,,38077
+,,3,Divine Child,,ddcm  C,,,,,,,,38078
+,,4,Guardian Angels Catholic,,ga    A,,,,,,,,71635
+,,5,Our Lady of Sorrows,,OLS   A,,,,,,,,51899

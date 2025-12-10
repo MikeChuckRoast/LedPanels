@@ -11,9 +11,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
-                          format_athlete_line, is_relay_event,
-                          load_affiliation_colors, paginate_items,
-                          parse_hex_color, parse_lynx_file)
+                          format_athlete_line, get_duplicate_relay_teams,
+                          is_relay_event, load_affiliation_colors,
+                          paginate_items, parse_hex_color, parse_lynx_file)
 
 
 class TestExtractRelaySuffix:
@@ -182,6 +182,117 @@ class TestIsRelayEvent:
         result = is_relay_event(athletes)
 
         assert result is False
+
+
+class TestGetDuplicateRelayTeams:
+    """Tests for get_duplicate_relay_teams function."""
+
+    def test_all_unique_teams(self):
+        """Test with all unique team names - should return empty set."""
+        athletes = [
+            {"last": "Divine Child", "affiliation": "ddcm  A"},
+            {"last": "Guardian Angels Catholic", "affiliation": "ga    A"},
+            {"last": "Our Lady of Sorrows", "affiliation": "OLS   A"}
+        ]
+
+        result = get_duplicate_relay_teams(athletes)
+
+        assert result == set()
+
+    def test_all_duplicate_teams(self):
+        """Test with all teams appearing twice."""
+        athletes = [
+            {"last": "Divine Child", "affiliation": "ddcm  A"},
+            {"last": "Divine Child", "affiliation": "ddcm  B"},
+            {"last": "Guardian Angels Catholic", "affiliation": "ga    A"},
+            {"last": "Guardian Angels Catholic", "affiliation": "ga    B"}
+        ]
+
+        result = get_duplicate_relay_teams(athletes)
+
+        assert result == {"divine child", "guardian angels catholic"}
+
+    def test_mixed_unique_and_duplicate(self):
+        """Test with mix of unique and duplicate teams."""
+        athletes = [
+            {"last": "Divine Child", "affiliation": "ddcm  A"},
+            {"last": "Divine Child", "affiliation": "ddcm  B"},
+            {"last": "Our Lady of Sorrows", "affiliation": "OLS   A"},
+            {"last": "Guardian Angels Catholic", "affiliation": "ga    A"}
+        ]
+
+        result = get_duplicate_relay_teams(athletes)
+
+        assert result == {"divine child"}
+        assert "our lady of sorrows" not in result
+        assert "guardian angels catholic" not in result
+
+    def test_case_insensitive_detection(self):
+        """Test that duplicate detection is case-insensitive."""
+        athletes = [
+            {"last": "Divine Child", "affiliation": "ddcm  A"},
+            {"last": "divine child", "affiliation": "ddcm  B"},
+            {"last": "DIVINE CHILD", "affiliation": "ddcm  C"}
+        ]
+
+        result = get_duplicate_relay_teams(athletes)
+
+        assert result == {"divine child"}
+
+    def test_three_of_same_team(self):
+        """Test with three entries of the same team."""
+        athletes = [
+            {"last": "Divine Child", "affiliation": "ddcm  A"},
+            {"last": "Divine Child", "affiliation": "ddcm  B"},
+            {"last": "Divine Child", "affiliation": "ddcm  C"},
+            {"last": "Guardian Angels Catholic", "affiliation": "ga    A"}
+        ]
+
+        result = get_duplicate_relay_teams(athletes)
+
+        assert result == {"divine child"}
+
+    def test_empty_athletes_list(self):
+        """Test with empty athletes list."""
+        athletes = []
+
+        result = get_duplicate_relay_teams(athletes)
+
+        assert result == set()
+
+    def test_single_team(self):
+        """Test with single team."""
+        athletes = [
+            {"last": "Divine Child", "affiliation": "ddcm  A"}
+        ]
+
+        result = get_duplicate_relay_teams(athletes)
+
+        assert result == set()
+
+    def test_ignores_empty_last_names(self):
+        """Test that empty last names are ignored."""
+        athletes = [
+            {"last": "Divine Child", "affiliation": "ddcm  A"},
+            {"last": "", "affiliation": "test  A"},
+            {"last": "Divine Child", "affiliation": "ddcm  B"}
+        ]
+
+        result = get_duplicate_relay_teams(athletes)
+
+        assert result == {"divine child"}
+
+    def test_missing_last_field(self):
+        """Test with missing 'last' field in athlete dict."""
+        athletes = [
+            {"last": "Divine Child", "affiliation": "ddcm  A"},
+            {"affiliation": "test  A"},  # No 'last' field
+            {"last": "Divine Child", "affiliation": "ddcm  B"}
+        ]
+
+        result = get_duplicate_relay_teams(athletes)
+
+        assert result == {"divine child"}
 
 
 class TestLoadTeamColors:

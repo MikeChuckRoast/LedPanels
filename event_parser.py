@@ -178,6 +178,32 @@ def extract_relay_suffix(affiliation: str) -> str:
     return ""
 
 
+def get_duplicate_relay_teams(athletes: List[Dict]) -> set:
+    """Return a set of team names (lowercase) that appear more than once in the relay event.
+
+    For relay events, team names are stored in the 'last' field.
+    Uses case-insensitive comparison.
+
+    Args:
+        athletes: List of athlete dictionaries
+
+    Returns:
+        Set of lowercase team names that appear multiple times
+    """
+    from collections import Counter
+
+    # Extract team names from 'last' field, convert to lowercase for case-insensitive comparison
+    team_names = [(athlete.get("last") or "").strip().lower() for athlete in athletes]
+    # Filter out empty strings
+    team_names = [name for name in team_names if name]
+
+    # Count occurrences
+    counts = Counter(team_names)
+
+    # Return set of teams that appear more than once
+    return {name for name, count in counts.items() if count > 1}
+
+
 def format_athlete_line(a: Dict, is_relay: bool = False) -> str:
     """Format athlete display string for the name column.
 

@@ -97,6 +97,12 @@ def colors_csv_fixture(fixture_path) -> Path:
 
 
 @pytest.fixture
+def relay_mixed_fixture(fixture_path) -> Path:
+    """Return path to relay_mixed_teams.evt fixture file with mixed duplicate scenarios."""
+    return fixture_path / "relay_mixed_teams.evt"
+
+
+@pytest.fixture
 def settings_toml_fixture(fixture_path) -> Path:
     """Return path to sample settings.toml fixture file."""
     return fixture_path / "sample_settings.toml"
