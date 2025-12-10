@@ -94,7 +94,7 @@ nav a.active {
   padding: 8px 12px;
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  font-size: 14px;
+  font-size: 18px;
 }
 
 .form-group input:focus,
@@ -169,11 +169,33 @@ table {
   margin-top: 10px;
 }
 
+table input[type="text"] {
+  font-size: 18px;
+  padding: 8px 12px;
+  vertical-align: middle;
+}
+
+table input[type="text"].team-name,
+table input[type="text"].team-affiliation {
+  width: 100%;
+}
+
+table input[type="text"].color-hex {
+  width: 110px;
+  margin-left: 5px;
+}
+
+table input[type="color"] {
+  vertical-align: middle;
+}
+
 th,
 td {
   padding: 12px;
   text-align: left;
   border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+  white-space: nowrap;
 }
 
 th {

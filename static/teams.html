@@ -103,32 +103,35 @@
                             (team, index) => `
                             <tr>
                                 <td>
-                                    <input type="text" value="${escapeHtml(
+                                    <input type="text" class="team-affiliation" value="${escapeHtml(
                                       team.affiliation
                                     )}" 
                                            onchange="updateTeam(${index}, 'affiliation', this.value)"
-                                           style="width: 100%;" required>
+                                           required>
                                 </td>
                                 <td>
-                                    <input type="text" value="${escapeHtml(
+                                    <input type="text" class="team-name" value="${escapeHtml(
                                       team.name
                                     )}" 
-                                           onchange="updateTeam(${index}, 'name', this.value)"
-                                           style="width: 100%;">
+                                           onchange="updateTeam(${index}, 'name', this.value)">
                                 </td>
                                 <td>
                                     <input type="color" value="${team.bgcolor}" 
                                            onchange="updateTeam(${index}, 'bgcolor', this.value)">
-                                    <input type="text" value="${team.bgcolor}" 
+                                    <input type="text" class="color-hex" value="${
+                                      team.bgcolor
+                                    }" 
                                            onchange="updateTeam(${index}, 'bgcolor', this.value)"
-                                           style="width: 80px; margin-left: 5px;" pattern="#[0-9a-fA-F]{6}">
+                                           pattern="#[0-9a-fA-F]{6}">
                                 </td>
                                 <td>
                                     <input type="color" value="${team.text}" 
                                            onchange="updateTeam(${index}, 'text', this.value)">
-                                    <input type="text" value="${team.text}" 
+                                    <input type="text" class="color-hex" value="${
+                                      team.text
+                                    }" 
                                            onchange="updateTeam(${index}, 'text', this.value)"
-                                           style="width: 80px; margin-left: 5px;" pattern="#[0-9a-fA-F]{6}">
+                                           pattern="#[0-9a-fA-F]{6}">
                                 </td>
                                 <td>
                                     <div style="background-color: ${
