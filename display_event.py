@@ -548,7 +548,9 @@ def main():
     parser.add_argument('--event', type=int, default=current_event['event'], help='Event number')
     parser.add_argument('--round', type=int, default=current_event['round'], help='Round number')
     parser.add_argument('--heat', type=int, default=current_event['heat'], help='Heat number')
-    parser.add_argument('--font', default=fonts['font_path'], help='Path to BDF font for rgbmatrix')
+    # Combine font_path and font_name for the full font path
+    default_font_full_path = os.path.join(fonts['font_path'], fonts['font_name'])
+    parser.add_argument('--font', default=default_font_full_path, help='Path to BDF font for rgbmatrix')
     parser.add_argument('--width', type=int, default=hw['width'], help='Display width in pixels')
     parser.add_argument('--height', type=int, default=hw['height'], help='Display height in pixels')
     parser.add_argument('--line-height', type=int, default=disp['line_height'], help='Pixels per text line for athlete rows')

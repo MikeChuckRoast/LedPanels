@@ -317,6 +317,10 @@ class WebServer:
                 config = toml.load(f)
 
             display_settings = config.get('display', {})
+            fonts_settings = config.get('fonts', {})
+            # Include font_name (editable) but not font_path (toml-only)
+            if 'font_name' in fonts_settings:
+                display_settings['font_name'] = fonts_settings['font_name']
             return jsonify({'display': display_settings}), 200
         except FileNotFoundError:
             return jsonify({'error': 'settings.toml file not found'}), 404
@@ -328,6 +332,7 @@ class WebServer:
         """Set display settings in settings.toml [display] section.
 
         Expects JSON body with 'display' object containing settings.
+        Can also update font_name in [fonts] section.
 
         Returns:
             JSON response with success/error and status code
@@ -339,6 +344,9 @@ class WebServer:
                 return jsonify({'error': 'Missing or invalid display settings object'}), 400
 
             new_display = data['display']
+
+            # Extract font_name if present (it will be saved to [fonts] section)
+            font_name = new_display.pop('font_name', None)
 
             # Validate display settings
             int_fields = ['line_height', 'header_line_height', 'header_rows', 'font_shift']
@@ -364,6 +372,14 @@ class WebServer:
                     except (ValueError, TypeError):
                         return jsonify({'error': f'{field} must be a number'}), 400
 
+            # Validate font_name if present
+            if font_name is not None:
+                if not isinstance(font_name, str) or not font_name.strip():
+                    return jsonify({'error': 'font_name must be a non-empty string'}), 400
+                # Basic validation - check if it looks like a font file
+                if not font_name.endswith('.bdf'):
+                    return jsonify({'error': 'font_name must be a .bdf font file'}), 400
+
             # Load current settings
             settings_file = self.config_dir / "settings.toml"
             with open(settings_file, 'r', encoding='utf-8') as f:
@@ -374,12 +390,24 @@ class WebServer:
                 config['display'] = {}
             config['display'].update(new_display)
 
+            # Update font_name in fonts section if provided
+            if font_name is not None:
+                if 'fonts' not in config:
+                    config['fonts'] = {}
+                config['fonts']['font_name'] = font_name
+                logging.info(f"Updated font_name: {font_name}")
+
             # Write back to file
             with open(settings_file, 'w', encoding='utf-8') as f:
                 toml.dump(config, f)
 
+            # Prepare response
+            response_display = config['display'].copy()
+            if 'fonts' in config and 'font_name' in config['fonts']:
+                response_display['font_name'] = config['fonts']['font_name']
+
             logging.info(f"Updated display settings: {new_display}")
-            return jsonify({'success': True, 'display': config['display']}), 200
+            return jsonify({'success': True, 'display': response_display}), 200
 
         except FileNotFoundError:
             return jsonify({'error': 'settings.toml file not found'}), 404

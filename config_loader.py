@@ -69,8 +69,9 @@ interval = 2.0                # Seconds per page when paging
 font_shift = 7                # Font positioning adjustment (vertical)
 
 [fonts]
-# Font file paths (use absolute paths)
-font_path = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf/helvB12.bdf"
+# Font configuration (use absolute path for font_path)
+font_path = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf"  # Directory containing font files
+font_name = "helvB12.bdf"  # Font filename (can be changed via web UI)
 
 [files]
 # Data file paths (relative to config directory)
@@ -166,9 +167,14 @@ def load_settings(config_dir: str) -> Dict[str, Any]:
     fonts = settings["fonts"]
     if "font_path" not in fonts:
         raise ConfigError("Missing 'font_path' in [fonts] section")
+    if "font_name" not in fonts:
+        raise ConfigError("Missing 'font_name' in [fonts] section")
     font_path = fonts["font_path"]
+    font_name = fonts["font_name"]
     if not isinstance(font_path, str) or not font_path:
         raise ConfigError("'font_path' must be a non-empty string")
+    if not isinstance(font_name, str) or not font_name:
+        raise ConfigError("'font_name' must be a non-empty string")
     # Note: Not validating file existence here since font might be platform-specific
 
     # Validate files (relative paths)
@@ -232,7 +238,7 @@ def load_settings(config_dir: str) -> Dict[str, Any]:
     logging.info(f"  Hardware: {hw['width']}x{hw['height']}, chain={hw['chain']}, parallel={hw['parallel']}")
     logging.info(f"  Display: line_height={disp['line_height']}, header={disp['header_line_height']}, interval={disp['interval']}s")
     logging.info(f"  Files: lynx={files['lynx_file']}, colors={files['colors_file']}")
-    logging.info(f"  Font: {fonts['font_path']}")
+    logging.info(f"  Font: {fonts['font_path']}/{fonts['font_name']}")
     logging.info(f"  Network: FPP={net['fpp_enabled']}, ColorLight={net['colorlight_enabled']}")
 
     return settings

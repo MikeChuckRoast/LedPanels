@@ -18,13 +18,15 @@ interval = 2.0                # Seconds per page when paging through athletes
 font_shift = 7                # Font positioning adjustment (vertical offset in pixels)
 
 [fonts]
-# Font file paths
-# Use absolute paths to BDF font files
+# Font configuration
+# font_path: Directory containing BDF font files (use absolute path)
+# font_name: Font filename (can be changed via web UI)
 # Examples:
-#   macOS:   "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf/helvB12.bdf"
-#   Linux:   "/home/mike/u8g2/tools/font/bdf/helvB12.bdf"
-#   Windows: "C:/Users/mike/Documents/fonts/helvB12.bdf"
-font_path = "/home/mike/u8g2/tools/font/bdf/helvB12.bdf"
+#   macOS:   font_path = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf"
+#   Linux:   font_path = "/home/mike/u8g2/tools/font/bdf"
+#   Windows: font_path = "C:/Users/mike/Documents/fonts"
+font_path = "/home/mike/u8g2/tools/font/bdf"
+font_name = "helvB12.bdf"
 
 [files]
 # Data file paths (relative to config directory)
