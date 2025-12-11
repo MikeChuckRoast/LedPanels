@@ -409,8 +409,8 @@ def create_colorlight_backend(interface: str, width: int, height: int):
 
     Args:
         interface: Network interface name (e.g., 'eth0', 'enp0s3')
-        width: Display width in pixels
-        height: Display height in pixels
+        width: Display width in pixels (individual panel width)
+        height: Display height in pixels (individual panel height)
 
     Returns:
         Tuple of (factory, options_class, graphics_class)
@@ -418,9 +418,16 @@ def create_colorlight_backend(interface: str, width: int, height: int):
     Note:
         Requires root/sudo privileges and Linux/Unix system with AF_PACKET support.
         Uses ColorLightGraphics wrapper which provides rgbmatrix-compatible API.
+        The factory calculates total display size by multiplying panel dimensions
+        by chain_length and parallel from the options.
     """
     def factory(options=None):
-        w = options.cols if options else width
-        h = options.rows if options else height
+        if options:
+            # Calculate total display size: panel size × chain × parallel
+            w = options.cols * options.chain_length
+            h = options.rows * options.parallel
+        else:
+            w = width
+            h = height
         return ColorLightMatrix(interface, w, h)
     return factory, ColorLightOptions, ColorLightGraphics

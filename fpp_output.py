@@ -284,16 +284,25 @@ def create_fpp_backend(host: str, port: int, width: int, height: int):
     Args:
         host: FPP receiver IP address
         port: FPP DDP port
-        width: Display width
-        height: Display height
+        width: Display width (individual panel width)
+        height: Display height (individual panel height)
 
     Returns:
         Tuple of (matrix_class, options_class, graphics_class)
+
+    Note:
+        The factory calculates total display size by multiplying panel dimensions
+        by chain_length and parallel from the options.
     """
     def create_matrix(options=None):
         """Factory function to create FPPMatrix with options."""
-        w = options.cols if options else width
-        h = options.rows if options else height
+        if options:
+            # Calculate total display size: panel size × chain × parallel
+            w = options.cols * options.chain_length
+            h = options.rows * options.parallel
+        else:
+            w = width
+            h = height
         return FPPMatrix(host, port, w, h)
 
     return create_matrix, FPPMatrixOptions, FPPGraphics
