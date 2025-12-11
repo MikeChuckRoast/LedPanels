@@ -650,8 +650,17 @@ def main():
                     logging.warning("Current event is past all scheduled events - using heat increment mode")
                     schedule = []  # Disable schedule navigation
                     starting_schedule_index = -1
-            logging.info(f"Schedule navigation enabled - starting at position {starting_schedule_index + 1} of {len(schedule)}")
-            logging.info(get_schedule_position_text(schedule, args.event, args.round, args.heat))
+                else:
+                    # Switch to the nearest event
+                    evt, rnd, ht = schedule[starting_schedule_index]
+                    args.event = evt
+                    args.round = rnd
+                    args.heat = ht
+                    position_text = get_schedule_position_text(schedule, evt, rnd, ht)
+                    logging.info(f"Initial event not in schedule - switched to nearest: {position_text}")
+            if schedule:
+                logging.info(f"Schedule navigation enabled - starting at position {starting_schedule_index + 1} of {len(schedule)}")
+                logging.info(get_schedule_position_text(schedule, args.event, args.round, args.heat))
         else:
             logging.warning("No valid entries in schedule - using heat increment mode")
             starting_schedule_index = -1
@@ -785,9 +794,13 @@ def main():
                                     logging.warning("Current event is past all scheduled events - disabling schedule navigation")
                                     schedule = []
                                 else:
+                                    # Switch to the nearest event
                                     evt, rnd, ht = schedule[starting_schedule_index]
+                                    args.event = evt
+                                    args.round = rnd
+                                    current_heat = ht
                                     position_text = get_schedule_position_text(schedule, evt, rnd, ht)
-                                    logging.info(f"Current event not in schedule - starting from nearest: {position_text}")
+                                    logging.info(f"Current event not in schedule - switched to nearest: {position_text}")
                             else:
                                 evt, rnd, ht = schedule[starting_schedule_index]
                                 position_text = get_schedule_position_text(schedule, evt, rnd, ht)
