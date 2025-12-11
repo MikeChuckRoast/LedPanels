@@ -30,6 +30,9 @@
 
         <div style="margin-bottom: 15px">
           <button class="btn btn-primary" onclick="addTeam()">Add Team</button>
+          <button class="btn btn-secondary" onclick="addMissingTeams()">
+            Add Missing Teams
+          </button>
           <button class="btn btn-success" onclick="saveTeams()">
             Save Changes
           </button>
@@ -195,6 +198,22 @@
           document.getElementById(
             "teams-container"
           ).innerHTML = `<div class="alert alert-error">Error loading teams: ${error.message}</div>`;
+        }
+      }
+
+      async function addMissingTeams() {
+        try {
+          const result = await postAPI("/api/teams/add_missing", {});
+          if (result.added_count === 0) {
+            showAlert(result.message || "No missing teams found.");
+          } else {
+            showAlert(
+              `Added ${result.added_count} missing team(s)! Refreshing list...`
+            );
+            await loadTeams();
+          }
+        } catch (error) {
+          showAlert(`Error adding missing teams: ${error.message}`, "error");
         }
       }
 

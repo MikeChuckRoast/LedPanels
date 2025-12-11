@@ -96,6 +96,10 @@ class WebServer:
         def set_display_settings():
             return self._set_display_settings()
 
+        @self.app.route('/api/teams/add_missing', methods=['POST'])
+        def add_missing_teams():
+            return self._add_missing_teams()
+
         @self.app.route('/api/upload/events', methods=['POST'])
         def upload_events():
             return self._upload_events()
@@ -316,6 +320,83 @@ class WebServer:
 
         except Exception as e:
             logging.error(f"Error setting teams: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    def _add_missing_teams(self) -> Tuple[Dict, int]:
+        """Add missing teams from lynx.evt to colors.csv.
+
+        Scans lynx.evt for unique team affiliations and adds any
+        teams not already in colors.csv with default colors.
+
+        Returns:
+            JSON response with count of teams added and status code
+        """
+        try:
+            lynx_file = self.config_dir / "lynx.evt"
+            colors_file = self.config_dir / "colors.csv"
+
+            # Check if lynx.evt exists
+            if not lynx_file.exists():
+                return jsonify({'error': 'lynx.evt file not found. Please upload an events file first.'}), 404
+
+            # Parse lynx.evt to get all events
+            try:
+                events = parse_lynx_file(str(lynx_file))
+            except Exception as e:
+                logging.error(f"Error parsing lynx.evt: {e}")
+                return jsonify({'error': f'Error parsing lynx.evt: {str(e)}'}), 500
+
+            # Extract unique affiliations from events, filtering out relay entries
+            lynx_teams = set()
+            for event_data in events.values():
+                for athlete in event_data.get('athletes', []):
+                    affiliation = athlete.get('affiliation', '').strip()
+                    first_name = athlete.get('first', '').strip()
+
+                    # Skip relay entries (no first name and affiliation matches pattern like 'ddcm  A')
+                    if not first_name and re.match(r'^\w{2,4}\s+\w$', affiliation):
+                        continue
+
+                    if affiliation:
+                        lynx_teams.add(affiliation)
+
+            if not lynx_teams:
+                return jsonify({'error': 'No teams found in lynx.evt file'}), 400
+
+            # Load existing teams from colors.csv
+            existing_teams = set()
+            if colors_file.exists():
+                with open(colors_file, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        affiliation = row.get('affiliation', '').strip()
+                        if affiliation:
+                            existing_teams.add(affiliation)
+
+            # Find missing teams
+            missing_teams = lynx_teams - existing_teams
+
+            if not missing_teams:
+                return jsonify({'success': True, 'added_count': 0, 'message': 'All teams from lynx.evt are already in colors.csv'}), 200
+
+            # Append missing teams to colors.csv with default colors
+            sorted_missing = sorted(missing_teams)
+            with open(colors_file, 'a', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                for team in sorted_missing:
+                    # Format: affiliation, name, bgcolor, text
+                    # Default: black background (#000000), white text (#ffffff)
+                    writer.writerow([team, team, '#000000', '#ffffff'])
+
+            logging.info(f"Added {len(missing_teams)} missing teams to colors.csv")
+            return jsonify({
+                'success': True,
+                'added_count': len(missing_teams),
+                'teams': sorted_missing
+            }), 200
+
+        except Exception as e:
+            logging.error(f"Error adding missing teams: {e}")
             return jsonify({'error': str(e)}), 500
 
     def _get_display_settings(self) -> Tuple[Dict, int]:
