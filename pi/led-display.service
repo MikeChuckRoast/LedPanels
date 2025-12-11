@@ -1,0 +1,19 @@
+[Unit]
+Description=LED Display Event Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/mike/LedPanels
+ExecStart=/usr/bin/python3 /home/mike/LedPanels/display_event.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables if needed
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target
