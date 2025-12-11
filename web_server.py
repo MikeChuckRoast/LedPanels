@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -94,6 +95,18 @@ class WebServer:
         @self.app.route('/api/display_settings', methods=['POST'])
         def set_display_settings():
             return self._set_display_settings()
+
+        @self.app.route('/api/upload/events', methods=['POST'])
+        def upload_events():
+            return self._upload_events()
+
+        @self.app.route('/api/upload/schedule', methods=['POST'])
+        def upload_schedule():
+            return self._upload_schedule()
+
+        @self.app.route('/api/upload/combined', methods=['POST'])
+        def upload_combined():
+            return self._upload_combined()
 
     def _get_events(self) -> Tuple[Dict, int]:
         """Get list of events from lynx.evt file.
@@ -413,6 +426,253 @@ class WebServer:
             return jsonify({'error': 'settings.toml file not found'}), 404
         except Exception as e:
             logging.error(f"Error setting display settings: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    def _upload_events(self) -> Tuple[Dict, int]:
+        """Upload and replace lynx.evt file.
+
+        Expects JSON body with 'content' field containing CSV text.
+
+        Returns:
+            JSON response with success/error and status code
+        """
+        try:
+            data = request.get_json()
+
+            if 'content' not in data or not isinstance(data['content'], str):
+                return jsonify({'error': 'Missing or invalid content field (must be string)'}), 400
+
+            content = data['content']
+
+            if not content.strip():
+                return jsonify({'error': 'Content cannot be empty'}), 400
+
+            # Validate content by attempting to parse it
+            events_file = self.config_dir / "lynx.evt"
+
+            # Create a temporary file to test parsing
+            temp_file = self.config_dir / "lynx.evt.tmp"
+            try:
+                with open(temp_file, 'w', encoding='utf-8', newline='') as f:
+                    f.write(content)
+
+                # Test parse the file
+                try:
+                    events = parse_lynx_file(str(temp_file))
+                    if not events:
+                        return jsonify({'error': 'No valid events found in content'}), 400
+                except Exception as e:
+                    return jsonify({'error': f'Invalid lynx.evt format: {e}'}), 400
+
+                # Parsing succeeded - create backup of existing file
+                if events_file.exists():
+                    backup_file = self.config_dir / "lynx.evt.bak"
+                    shutil.copy2(events_file, backup_file)
+                    logging.info(f"Created backup: {backup_file}")
+
+                # Move temp file to actual file
+                shutil.move(str(temp_file), str(events_file))
+
+                logging.info(f"Updated lynx.evt: {len(events)} events")
+                return jsonify({'success': True, 'event_count': len(events)}), 200
+
+            finally:
+                # Clean up temp file if it still exists
+                if temp_file.exists():
+                    temp_file.unlink()
+
+        except Exception as e:
+            logging.error(f"Error uploading events: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    def _upload_schedule(self) -> Tuple[Dict, int]:
+        """Upload and replace lynx.sch file.
+
+        Expects JSON body with 'content' field containing CSV text.
+        Validates schedule entries against existing events in lynx.evt.
+
+        Returns:
+            JSON response with success/error and status code
+        """
+        try:
+            data = request.get_json()
+
+            if 'content' not in data or not isinstance(data['content'], str):
+                return jsonify({'error': 'Missing or invalid content field (must be string)'}), 400
+
+            content = data['content']
+
+            if not content.strip():
+                return jsonify({'error': 'Content cannot be empty'}), 400
+
+            # Load existing events for validation
+            events_file = self.config_dir / "lynx.evt"
+            try:
+                events = parse_lynx_file(str(events_file))
+            except Exception as e:
+                return jsonify({'error': f'Cannot validate schedule: failed to load lynx.evt: {e}'}), 500
+
+            # Create a temporary file to test parsing
+            schedule_file = self.config_dir / "lynx.sch"
+            temp_file = self.config_dir / "lynx.sch.tmp"
+
+            try:
+                with open(temp_file, 'w', encoding='utf-8', newline='') as f:
+                    f.write(content)
+
+                # Test parse the file
+                try:
+                    schedule = parse_schedule(str(temp_file))
+                    if not schedule:
+                        return jsonify({'error': 'No valid schedule entries found in content'}), 400
+                except Exception as e:
+                    return jsonify({'error': f'Invalid lynx.sch format: {e}'}), 400
+
+                # Validate schedule entries exist in events
+                valid_schedule = validate_schedule_entries(schedule, events)
+                invalid_count = len(schedule) - len(valid_schedule)
+
+                if invalid_count > 0:
+                    logging.warning(f"Schedule contains {invalid_count} entries not found in lynx.evt")
+
+                if not valid_schedule:
+                    return jsonify({'error': 'No valid schedule entries (none match existing events)'}), 400
+
+                # Validation succeeded - create backup of existing file
+                if schedule_file.exists():
+                    backup_file = self.config_dir / "lynx.sch.bak"
+                    shutil.copy2(schedule_file, backup_file)
+                    logging.info(f"Created backup: {backup_file}")
+
+                # Move temp file to actual file
+                shutil.move(str(temp_file), str(schedule_file))
+
+                result = {
+                    'success': True,
+                    'total_entries': len(schedule),
+                    'valid_entries': len(valid_schedule),
+                    'invalid_entries': invalid_count
+                }
+
+                logging.info(f"Updated lynx.sch: {len(valid_schedule)}/{len(schedule)} valid entries")
+                return jsonify(result), 200
+
+            finally:
+                # Clean up temp file if it still exists
+                if temp_file.exists():
+                    temp_file.unlink()
+
+        except Exception as e:
+            logging.error(f"Error uploading schedule: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    def _upload_combined(self) -> Tuple[Dict, int]:
+        """Upload and replace both lynx.evt and lynx.sch files atomically.
+
+        Expects JSON body with 'events' and 'schedule' fields containing CSV text.
+        Both files are validated before either is written. If validation fails,
+        neither file is updated.
+
+        Returns:
+            JSON response with success/error and status code
+        """
+        try:
+            data = request.get_json()
+
+            # Validate required fields
+            if 'events' not in data or not isinstance(data['events'], str):
+                return jsonify({'error': 'Missing or invalid events field (must be string)'}), 400
+
+            if 'schedule' not in data or not isinstance(data['schedule'], str):
+                return jsonify({'error': 'Missing or invalid schedule field (must be string)'}), 400
+
+            events_content = data['events']
+            schedule_content = data['schedule']
+
+            if not events_content.strip():
+                return jsonify({'error': 'Events content cannot be empty'}), 400
+
+            if not schedule_content.strip():
+                return jsonify({'error': 'Schedule content cannot be empty'}), 400
+
+            events_file = self.config_dir / "lynx.evt"
+            schedule_file = self.config_dir / "lynx.sch"
+            events_temp = self.config_dir / "lynx.evt.tmp"
+            schedule_temp = self.config_dir / "lynx.sch.tmp"
+
+            try:
+                # Write both temp files
+                with open(events_temp, 'w', encoding='utf-8', newline='') as f:
+                    f.write(events_content)
+
+                with open(schedule_temp, 'w', encoding='utf-8', newline='') as f:
+                    f.write(schedule_content)
+
+                # Parse and validate events file
+                try:
+                    events = parse_lynx_file(str(events_temp))
+                    if not events:
+                        return jsonify({'error': 'No valid events found in events content'}), 400
+                except Exception as e:
+                    return jsonify({'error': f'Invalid lynx.evt format: {e}'}), 400
+
+                # Parse and validate schedule file
+                try:
+                    schedule = parse_schedule(str(schedule_temp))
+                    if not schedule:
+                        return jsonify({'error': 'No valid schedule entries found in schedule content'}), 400
+                except Exception as e:
+                    return jsonify({'error': f'Invalid lynx.sch format: {e}'}), 400
+
+                # Validate schedule entries exist in events
+                valid_schedule = validate_schedule_entries(schedule, events)
+                invalid_count = len(schedule) - len(valid_schedule)
+
+                if invalid_count > 0:
+                    logging.warning(f"Schedule contains {invalid_count} entries not found in events")
+
+                if not valid_schedule:
+                    return jsonify({'error': 'No valid schedule entries (none match events in lynx.evt)'}), 400
+
+                # Both files validated - create backups
+                if events_file.exists():
+                    backup_file = self.config_dir / "lynx.evt.bak"
+                    shutil.copy2(events_file, backup_file)
+                    logging.info(f"Created backup: {backup_file}")
+
+                if schedule_file.exists():
+                    backup_file = self.config_dir / "lynx.sch.bak"
+                    shutil.copy2(schedule_file, backup_file)
+                    logging.info(f"Created backup: {backup_file}")
+
+                # Move temp files to actual files
+                shutil.move(str(events_temp), str(events_file))
+                shutil.move(str(schedule_temp), str(schedule_file))
+
+                result = {
+                    'success': True,
+                    'events': {
+                        'event_count': len(events)
+                    },
+                    'schedule': {
+                        'total_entries': len(schedule),
+                        'valid_entries': len(valid_schedule),
+                        'invalid_entries': invalid_count
+                    }
+                }
+
+                logging.info(f"Updated both files: {len(events)} events, {len(valid_schedule)}/{len(schedule)} valid schedule entries")
+                return jsonify(result), 200
+
+            finally:
+                # Clean up temp files if they still exist
+                if events_temp.exists():
+                    events_temp.unlink()
+                if schedule_temp.exists():
+                    schedule_temp.unlink()
+
+        except Exception as e:
+            logging.error(f"Error uploading combined files: {e}")
             return jsonify({'error': str(e)}), 500
 
     def start(self):

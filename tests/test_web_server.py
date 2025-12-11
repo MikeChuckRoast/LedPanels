@@ -214,3 +214,286 @@ class TestWebServerMethods:
         with server.app.test_request_context(json={"teams": new_teams}):
             response, status = server._set_teams()
             assert status == 200
+
+
+class TestWebServerFileUpload:
+    """Tests for file upload endpoints."""
+
+    def test_upload_events_success(self, populated_config_dir):
+        """Test successful events file upload."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5020)
+
+        # Read sample events file
+        sample_file = Path(__file__).parent / "fixtures" / "sample_lynx.evt"
+        with open(sample_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        data = {"content": content}
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_events()
+            assert status == 200
+            result = response.get_json()
+            assert result['success'] is True
+            assert result['event_count'] > 0
+
+        # Verify backup was created
+        backup_file = Path(populated_config_dir) / "lynx.evt.bak"
+        assert backup_file.exists()
+
+        # Verify file was updated
+        events_file = Path(populated_config_dir) / "lynx.evt"
+        with open(events_file, 'r', encoding='utf-8') as f:
+            saved_content = f.read()
+        assert saved_content == content
+
+    def test_upload_events_missing_content(self, populated_config_dir):
+        """Test events upload with missing content field."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5021)
+
+        data = {}
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_events()
+            assert status == 400
+            result = response.get_json()
+            assert 'error' in result
+            assert 'content' in result['error'].lower()
+
+    def test_upload_events_empty_content(self, populated_config_dir):
+        """Test events upload with empty content."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5022)
+
+        data = {"content": "   "}
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_events()
+            assert status == 400
+            result = response.get_json()
+            assert 'error' in result
+            assert 'empty' in result['error'].lower()
+
+    def test_upload_events_invalid_format(self, populated_config_dir):
+        """Test events upload with invalid format."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5023)
+
+        data = {"content": "not,valid,csv,format\nwith,random,data"}
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_events()
+            assert status == 400
+            result = response.get_json()
+            assert 'error' in result
+
+    def test_upload_schedule_success(self, populated_config_dir):
+        """Test successful schedule file upload."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5024)
+
+        # Read sample schedule file
+        sample_file = Path(__file__).parent / "fixtures" / "sample_schedule.sch"
+        with open(sample_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        data = {"content": content}
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_schedule()
+            assert status == 200
+            result = response.get_json()
+            assert result['success'] is True
+            assert result['total_entries'] > 0
+            assert result['valid_entries'] >= 0
+
+        # Verify file was updated
+        schedule_file = Path(populated_config_dir) / "lynx.sch"
+        assert schedule_file.exists()
+        with open(schedule_file, 'r', encoding='utf-8') as f:
+            saved_content = f.read()
+        assert saved_content == content
+
+    def test_upload_schedule_missing_content(self, populated_config_dir):
+        """Test schedule upload with missing content field."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5025)
+
+        data = {}
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_schedule()
+            assert status == 400
+            result = response.get_json()
+            assert 'error' in result
+            assert 'content' in result['error'].lower()
+
+    def test_upload_schedule_empty_content(self, populated_config_dir):
+        """Test schedule upload with empty content."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5026)
+
+        data = {"content": "   "}
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_schedule()
+            assert status == 400
+            result = response.get_json()
+            assert 'error' in result
+            assert 'empty' in result['error'].lower()
+
+    def test_upload_schedule_validates_against_events(self, populated_config_dir):
+        """Test schedule upload validates entries against events."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5027)
+
+        # Create schedule with non-existent events
+        content = "; Test schedule\nevent,round,heat\n999,999,999\n"
+
+        data = {"content": content}
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_schedule()
+            assert status == 400
+            result = response.get_json()
+            assert 'error' in result
+            # Should fail because no valid entries match events
+
+    def test_upload_combined_success(self, populated_config_dir):
+        """Test successful combined upload of both files."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5028)
+
+        # Read sample files
+        events_file = Path(__file__).parent / "fixtures" / "sample_lynx.evt"
+        schedule_file = Path(__file__).parent / "fixtures" / "sample_schedule.sch"
+
+        with open(events_file, 'r', encoding='utf-8') as f:
+            events_content = f.read()
+
+        with open(schedule_file, 'r', encoding='utf-8') as f:
+            schedule_content = f.read()
+
+        data = {
+            "events": events_content,
+            "schedule": schedule_content
+        }
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_combined()
+            assert status == 200
+            result = response.get_json()
+            assert result['success'] is True
+            assert 'events' in result
+            assert 'schedule' in result
+            assert result['events']['event_count'] > 0
+            assert result['schedule']['valid_entries'] > 0
+
+        # Verify files were created/updated
+        assert (Path(populated_config_dir) / "lynx.evt").exists()
+        assert (Path(populated_config_dir) / "lynx.sch").exists()
+
+    def test_upload_combined_missing_events(self, populated_config_dir):
+        """Test combined upload with missing events field."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5029)
+
+        data = {
+            "schedule": "event,round,heat\n1,1,1\n"
+        }
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_combined()
+            assert status == 400
+            result = response.get_json()
+            assert 'error' in result
+            assert 'events' in result['error'].lower()
+
+    def test_upload_combined_missing_schedule(self, populated_config_dir):
+        """Test combined upload with missing schedule field."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5030)
+
+        sample_file = Path(__file__).parent / "fixtures" / "sample_lynx.evt"
+        with open(sample_file, 'r', encoding='utf-8') as f:
+            events_content = f.read()
+
+        data = {
+            "events": events_content
+        }
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_combined()
+            assert status == 400
+            result = response.get_json()
+            assert 'error' in result
+            assert 'schedule' in result['error'].lower()
+
+    def test_upload_combined_validates_schedule_against_new_events(self, populated_config_dir):
+        """Test combined upload validates schedule against new events (not old)."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5031)
+
+        # Create new events and matching schedule
+        events_content = "10,1,1,Test Event,,,,,,100\n,1,1,Smith,John,Test,,,,,,,123\n"
+        schedule_content = "event,round,heat\n10,1,1\n"
+
+        data = {
+            "events": events_content,
+            "schedule": schedule_content
+        }
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_combined()
+            assert status == 200
+            result = response.get_json()
+            assert result['success'] is True
+            assert result['schedule']['valid_entries'] == 1
+
+    def test_upload_combined_atomic_rollback(self, populated_config_dir):
+        """Test that combined upload doesn't update if schedule validation fails."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5032)
+
+        # Get original events file content
+        events_file = Path(populated_config_dir) / "lynx.evt"
+        with open(events_file, 'r', encoding='utf-8') as f:
+            original_events = f.read()
+
+        # Try to upload with valid events but invalid schedule (no matching entries)
+        events_content = "10,1,1,Test Event,,,,,,100\n,1,1,Smith,John,Test,,,,,,,123\n"
+        schedule_content = "event,round,heat\n999,1,1\n"  # Non-existent event
+
+        data = {
+            "events": events_content,
+            "schedule": schedule_content
+        }
+
+        with server.app.test_request_context(json=data):
+            response, status = server._upload_combined()
+            assert status == 400  # Should fail validation
+
+        # Verify original events file was not changed
+        with open(events_file, 'r', encoding='utf-8') as f:
+            current_events = f.read()
+
+        assert current_events == original_events
+
+        # Verify schedule file was not created
+        schedule_file = Path(populated_config_dir) / "lynx.sch"
+        assert not schedule_file.exists()
