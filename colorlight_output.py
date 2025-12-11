@@ -213,7 +213,7 @@ class ColorLightMatrix:
             # Send init frames AFTER all data to commit/display the new frame
             self._send_init_frames()
 
-            logging.info("ColorLight frame sent: %d data frames, %d total bytes", frame_count, bytes_sent)
+            logging.debug("ColorLight frame sent: %d data frames, %d total bytes", frame_count, bytes_sent)
 
         except Exception as e:
             logging.error("Failed to send frame to ColorLight: %s", e)
