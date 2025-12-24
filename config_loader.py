@@ -106,6 +106,22 @@ poll_interval = 1.0          # Polling interval in seconds (fallback mode only)
 web_enabled = true           # Enable web interface
 web_host = "0.0.0.0"          # Host to bind to (0.0.0.0 = all interfaces)
 web_port = 5000              # Port for web server
+
+[scoreboard]
+# UDP scoreboard display settings (separate from main display)
+udp_port = 5568              # UDP port to listen on
+buffer_size = 4096           # Maximum UDP packet size
+top_height = 24              # Height of top section (event name) in pixels
+bottom_height = 40           # Height of bottom section (time) in pixels
+top_font_name = "helvB12.bdf"    # Font for event name
+bottom_font_name = "helvB18.bdf" # Font for time display
+font_shift = 7               # Font positioning adjustment (vertical offset)
+# Hardware configuration for scoreboard (3 panels wide x 2 panels tall)
+width = 64                   # Base panel width
+height = 32                  # Base panel height
+chain = 3                    # Panels chained horizontally
+parallel = 2                 # Panels stacked vertically
+gpio_slowdown = 4            # GPIO slowdown
 """
         try:
             with open(settings_path, "w", encoding="utf-8") as f:
@@ -232,6 +248,37 @@ def load_settings(config_dir: str) -> Dict[str, Any]:
                 raise ConfigError("web.web_host must be a string")
         if "web_port" in web:
             _validate_port(web, "web_port", "web")
+
+    # Validate scoreboard (optional section)
+    if "scoreboard" in settings:
+        scoreboard = settings["scoreboard"]
+        if "udp_port" in scoreboard:
+            _validate_port(scoreboard, "udp_port", "scoreboard")
+        if "buffer_size" in scoreboard:
+            _validate_positive_int(scoreboard, "buffer_size", "scoreboard")
+        if "top_height" in scoreboard:
+            _validate_positive_int(scoreboard, "top_height", "scoreboard")
+        if "bottom_height" in scoreboard:
+            _validate_positive_int(scoreboard, "bottom_height", "scoreboard")
+        if "top_font_name" in scoreboard:
+            if not isinstance(scoreboard["top_font_name"], str):
+                raise ConfigError("scoreboard.top_font_name must be a string")
+        if "bottom_font_name" in scoreboard:
+            if not isinstance(scoreboard["bottom_font_name"], str):
+                raise ConfigError("scoreboard.bottom_font_name must be a string")
+        if "font_shift" in scoreboard:
+            _validate_int(scoreboard, "font_shift", "scoreboard")
+        # Validate scoreboard hardware settings
+        if "width" in scoreboard:
+            _validate_positive_int(scoreboard, "width", "scoreboard")
+        if "height" in scoreboard:
+            _validate_positive_int(scoreboard, "height", "scoreboard")
+        if "chain" in scoreboard:
+            _validate_positive_int(scoreboard, "chain", "scoreboard")
+        if "parallel" in scoreboard:
+            _validate_positive_int(scoreboard, "parallel", "scoreboard")
+        if "gpio_slowdown" in scoreboard:
+            _validate_non_negative_int(scoreboard, "gpio_slowdown", "scoreboard")
 
     # Log loaded configuration
     logging.info("Configuration loaded successfully:")

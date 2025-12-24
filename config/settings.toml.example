@@ -72,3 +72,20 @@ poll_interval = 1.0          # Polling interval in seconds (fallback mode only)
 web_enabled = true           # Enable web interface
 web_host = "0.0.0.0"          # Host to bind to (0.0.0.0 = all interfaces, 127.0.0.1 = localhost only)
 web_port = 5000              # Port for web server (default HTTP alternative: 5000)
+
+[scoreboard]
+# UDP scoreboard display settings (separate from main display)
+# Listens for JSON messages on UDP port and displays event name + time
+# Used with udp_scoreboard.py script
+udp_port = 5568              # UDP port to listen on for JSON messages
+buffer_size = 4096           # Maximum UDP packet size
+top_height = 24              # Height of top section (event name) in pixels
+bottom_height = 40           # Height of bottom section (time) in pixels
+top_font_name = "helvB14.bdf"    # Font for event name (top section)
+bottom_font_name = "helvB24.bdf" # Font for time display (bottom section)
+font_shift = 7               # Font positioning adjustment (vertical offset in pixels)# Hardware configuration for scoreboard (independent of main display)
+width = 64                   # Base panel width in pixels
+height = 32                  # Base panel height in pixels
+chain = 3                    # Panels chained horizontally (3 wide)
+parallel = 2                 # Panels stacked vertically (2 tall)
+gpio_slowdown = 4            # GPIO slowdown for RGBMatrixOptions

@@ -32,6 +32,9 @@ from typing import Dict, List, Optional, Tuple
 # Import from local modules
 from config_loader import (ConfigError, ensure_config_directory,
                            load_current_event, load_settings)
+from display_utils import (fill_rectangle, load_font_with_fallback,
+                           measure_text_width, truncate_text_to_width,
+                           wrap_text_lines)
 from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
                           format_athlete_line, get_duplicate_relay_teams,
                           is_relay_event, load_affiliation_colors,
@@ -134,35 +137,17 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
     black = graphics.Color(0, 0, 0)
 
     # Load font
-    font = graphics.Font()
-    try:
-        font.LoadFont(font_path)
-        logging.info("Loaded font: %s", font_path)
-    except Exception:
-        # Try relative path
-        alt = os.path.join(os.path.dirname(__file__), font_path)
-        try:
-            font.LoadFont(alt)
-            logging.info("Loaded font (alt): %s", alt)
-        except Exception:
-            logging.warning("Failed to load font '%s' for rgbmatrix; drawing may be mis-sized", font_path)
-
-    # Helper to measure text width using the rgbmatrix font API or a fallback
-    def get_text_width(text: str) -> int:
-        try:
-            return sum(font.CharacterWidth(ord(c)) for c in text)
-        except Exception:
-            return max(1, len(text)) * 6
+    font = load_font_with_fallback(graphics, font_path)
 
     # Compute a lane column width (based on all athletes in the event) so we can
     # align names into a consistent column. Add a small padding gap.
     lane_col_width = 0
     for a in athletes:
         lane_txt = (a.get("lane") or "").strip()
-        w = get_text_width(lane_txt)
+        w = measure_text_width(font, lane_txt)
         if w > lane_col_width:
             lane_col_width = w
-    lane_col_width = max(lane_col_width, get_text_width("88"))  # at least space for two-digit lane
+    lane_col_width = max(lane_col_width, measure_text_width(font, "88"))  # at least space for two-digit lane
     lane_x = 1
     name_x = lane_x + lane_col_width + 3
 
@@ -173,39 +158,21 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
 
         # Draw header background (white) for the header_rows
         header_height = header_rows * header_line_height
-        for y in range(0, header_height):
-            graphics.DrawLine(canvas, 0, y, canvas_width - 1, y, white)
+        fill_rectangle(canvas, graphics, 0, 0, canvas_width - 1, header_height - 1, white)
 
         # Wrap header text into multiple lines if needed
         available_header_width = canvas_width - 2  # Leave 1px margin on each side
-        words = header.split()
-        header_lines = []
-        current_line = ""
-
-        for word in words:
-            test_line = (current_line + " " + word).strip()
-            if get_text_width(test_line) <= available_header_width:
-                current_line = test_line
-            else:
-                if current_line:
-                    header_lines.append(current_line)
-                current_line = word
-
-        if current_line:
-            header_lines.append(current_line)
+        header_lines = wrap_text_lines(font, header, available_header_width)
 
         # Truncate to header_rows if we have too many lines
         if len(header_lines) > header_rows:
             header_lines = header_lines[:header_rows]
             # Truncate last line if needed
-            last_line = header_lines[-1]
-            while last_line and get_text_width(last_line) > available_header_width:
-                last_line = last_line[:-1]
-            header_lines[-1] = last_line
+            header_lines[-1] = truncate_text_to_width(font, header_lines[-1], available_header_width)
 
         # Draw each header line, centered within its row
         for line_idx, line_text in enumerate(header_lines):
-            line_width = get_text_width(line_text)
+            line_width = measure_text_width(font, line_text)
             x_pos = max(1, (canvas_width - line_width) // 2)
             y_pos = (line_idx * header_line_height) + (header_line_height + font.height) // 2 - font_shift
             graphics.DrawText(canvas, font, x_pos, y_pos, black, line_text)
@@ -239,8 +206,7 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
                 text_color = graphics.Color(text_rgb[0], text_rgb[1], text_rgb[2])
 
             # Fill background for this line
-            for y in range(y0, y1 + 1):
-                graphics.DrawLine(canvas, 0, y, canvas_width - 1, y, bg_color)
+            fill_rectangle(canvas, graphics, 0, y0, canvas_width - 1, y1, bg_color)
 
             # Draw lane and name in columns
             lane_txt = (athlete.get("lane") or "").strip()
@@ -265,7 +231,7 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
                         # Team has duplicates - show suffix in right column
                         suffix = extract_relay_suffix((athlete.get("affiliation") or "").strip())
                         # Reserve space for suffix
-                        suffix_col_width = get_text_width("W") + 2  # Use 'W' as widest letter
+                        suffix_col_width = measure_text_width(font, "W") + 2  # Use 'W' as widest letter
                         suffix_x = canvas_width - suffix_col_width - 1
                         # Calculate available width for team name (between name_x and suffix column)
                         available_width = suffix_x - name_x - 3  # Leave 3px gap before suffix
@@ -275,11 +241,7 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
                         available_width = canvas_width - name_x - 1
 
                     # Truncate team name if needed to fit available space
-                    team_name_width = get_text_width(team_name)
-                    if team_name_width > available_width:
-                        # Truncate character by character until it fits
-                        while team_name and get_text_width(team_name) > available_width:
-                            team_name = team_name[:-1]
+                    team_name = truncate_text_to_width(font, team_name, available_width)
 
                     # Draw team name in middle column
                     graphics.DrawText(canvas, font, name_x, y_txt, text_color, team_name)
