@@ -63,7 +63,7 @@ def calculate_text_baseline(y0: int, line_height: int, font, font_shift: int) ->
     Returns:
         Y coordinate for text baseline
     """
-    font_height = int(font.props['cap_height'])
+    font_height = int(font.props.get('cap_height', font.props['font_ascent']))
     offset = (line_height - font_height) / 2
     return y0 + line_height - offset + font_shift
 

@@ -32,7 +32,8 @@ from typing import Dict, List, Optional, Tuple
 # Import from local modules
 from config_loader import (ConfigError, ensure_config_directory,
                            load_current_event, load_settings)
-from display_utils import (fill_rectangle, load_font_with_fallback,
+from display_utils import (calculate_text_baseline, draw_centered_text,
+                           fill_rectangle, load_font_with_fallback,
                            measure_text_width, truncate_text_to_width,
                            wrap_text_lines)
 from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
@@ -172,11 +173,13 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
 
         # Draw each header line, centered within its row
         for line_idx, line_text in enumerate(header_lines):
-            line_width = measure_text_width(font, line_text)
-            x_pos = max(1, (canvas_width - line_width) // 2)
-            y_pos = (line_idx * header_line_height) + (header_line_height + font.height) // 2 - font_shift
-            graphics.DrawText(canvas, font, x_pos, y_pos, black, line_text)
-
+            draw_centered_text(canvas, graphics, font,
+                               line_idx * header_line_height,
+                               header_line_height,
+                               canvas_width,
+                               line_text,
+                               black,
+                               font_shift)
         # Draw athlete lines
         for idx, athlete in enumerate(page):
             # Y position starts after header
@@ -211,7 +214,7 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
             # Draw lane and name in columns
             lane_txt = (athlete.get("lane") or "").strip()
             # Baseline for this row
-            y_txt = y0 + (line_height + font.height) // 2 - font_shift
+            y_txt = calculate_text_baseline(y0, line_height, font, font_shift)
             # Draw lane (left column)
             graphics.DrawText(canvas, font, lane_x, y_txt, text_color, lane_txt)
 
