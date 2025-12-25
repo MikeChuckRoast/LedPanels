@@ -27,8 +27,9 @@ from typing import Dict, Optional
 
 from config_loader import ConfigError, load_settings
 from display_utils import (calculate_text_baseline, draw_centered_text,
-                           fill_rectangle, load_font_with_fallback,
-                           measure_text_width, truncate_text_to_width)
+                           fill_rectangle, load_font_metadata,
+                           load_font_with_fallback, measure_text_width,
+                           truncate_text_to_width)
 from matrix_backend import get_matrix_backend
 
 
@@ -100,6 +101,7 @@ def handle_message(data: dict, current_state: Dict[str, str]) -> Optional[Dict[s
 
 
 def render_scoreboard(canvas, graphics, top_font, bottom_font,
+                     top_font_metadata, bottom_font_metadata,
                      event_name: str, time_value: str,
                      canvas_width: int, canvas_height: int,
                      top_font_shift_v: int, top_font_shift_h: int,
@@ -111,6 +113,8 @@ def render_scoreboard(canvas, graphics, top_font, bottom_font,
         graphics: Graphics module from matrix backend
         top_font: Font for event name section
         bottom_font: Font for time section
+        top_font_metadata: Metadata dict for top font (from load_font_metadata)
+        bottom_font_metadata: Metadata dict for bottom font (from load_font_metadata)
         event_name: Event name to display (top section)
         time_value: Time value to display (bottom section)
         canvas_width: Canvas width in pixels
@@ -139,7 +143,7 @@ def render_scoreboard(canvas, graphics, top_font, bottom_font,
         # Truncate event name to fit display width (with 2px margin on each side)
         available_width = canvas_width - 4
         event_name_display = truncate_text_to_width(top_font, event_name, available_width)
-        draw_centered_text(canvas, graphics, top_font, 0, top_height, canvas_width,
+        draw_centered_text(canvas, graphics, top_font, top_font_metadata, 0, top_height, canvas_width,
                            event_name_display, white, top_font_shift_v)
 
     # Draw bottom section (time) - black background, white text
@@ -150,7 +154,7 @@ def render_scoreboard(canvas, graphics, top_font, bottom_font,
         # Truncate time to fit display width (with 2px margin on each side)
         available_width = canvas_width - 4
         time_value_display = truncate_text_to_width(bottom_font, time_value, available_width)
-        draw_centered_text(canvas, graphics, bottom_font, bottom_y_start, bottom_height, canvas_width,
+        draw_centered_text(canvas, graphics, bottom_font, bottom_font_metadata, bottom_y_start, bottom_height, canvas_width,
                            time_value_display, white, bottom_font_shift_v)
 
 
@@ -263,6 +267,8 @@ def main():
     logging.info("Loading fonts...")
     top_font = load_font_with_fallback(graphics, args.top_font)
     bottom_font = load_font_with_fallback(graphics, args.bottom_font)
+    top_font_metadata = load_font_metadata(args.top_font)
+    bottom_font_metadata = load_font_metadata(args.bottom_font)
 
     # Initialize state
     state = {
@@ -282,6 +288,7 @@ def main():
 
         # Initial render (blank display)
         render_scoreboard(canvas, graphics, top_font, bottom_font,
+                         top_font_metadata, bottom_font_metadata,
                          state["event_name"], state["time_value"],
                          canvas.width, canvas.height,
                          args.top_font_shift_vertical, args.top_font_shift_horizontal,
@@ -315,6 +322,7 @@ def main():
 
             # Render current state (every loop iteration for immediate updates)
             render_scoreboard(canvas, graphics, top_font, bottom_font,
+                             top_font_metadata, bottom_font_metadata,
                              state["event_name"], state["time_value"],
                              canvas.width, canvas.height,
                              args.top_font_shift_vertical, args.top_font_shift_horizontal,

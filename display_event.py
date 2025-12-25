@@ -33,9 +33,9 @@ from typing import Dict, List, Optional, Tuple
 from config_loader import (ConfigError, ensure_config_directory,
                            load_current_event, load_settings)
 from display_utils import (calculate_text_baseline, draw_centered_text,
-                           fill_rectangle, load_font_with_fallback,
-                           measure_text_width, truncate_text_to_width,
-                           wrap_text_lines)
+                           fill_rectangle, load_font_metadata,
+                           load_font_with_fallback, measure_text_width,
+                           truncate_text_to_width, wrap_text_lines)
 from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
                           format_athlete_line, get_duplicate_relay_teams,
                           is_relay_event, load_affiliation_colors,
@@ -140,6 +140,9 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
     # Load font
     font = load_font_with_fallback(graphics, font_path)
 
+    # Load font metadata for portable rendering
+    font_metadata = load_font_metadata(font_path)
+
     # Compute a lane column width (based on all athletes in the event) so we can
     # align names into a consistent column. Add a small padding gap.
     lane_col_width = 0
@@ -173,7 +176,7 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
 
         # Draw each header line, centered within its row
         for line_idx, line_text in enumerate(header_lines):
-            draw_centered_text(canvas, graphics, font,
+            draw_centered_text(canvas, graphics, font, font_metadata,
                                line_idx * header_line_height,
                                header_line_height,
                                canvas_width,
