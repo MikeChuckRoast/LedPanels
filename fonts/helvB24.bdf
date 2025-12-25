@@ -1,9 +1,9 @@
 STARTFONT 2.1
 FONT -Adobe-Helvetica-Bold-R-Normal--34-240-100-100-P-182-ISO10646-1
 SIZE 24 100 100
-FONTBOUNDINGBOX 40 49 -6 -12
+FONTBOUNDINGBOX 40 49 0 -12
 COMMENT ISO10646-1 extension by Markus Kuhn <mkuhn@acm.org>, 2001-03-20
-COMMENT 
+COMMENT
 COMMENT +
 COMMENT  Copyright 1984-1989, 1994 Adobe Systems Incorporated.
 COMMENT  Copyright 1988, 1994 Digital Equipment Corporation.
