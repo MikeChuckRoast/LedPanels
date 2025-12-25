@@ -15,18 +15,17 @@ line_height = 24              # Athlete row height in pixels
 header_line_height = 16       # Header row height in pixels
 header_rows = 2               # Number of header rows (allows text wrapping for long event names)
 interval = 2.0                # Seconds per page when paging through athletes
-font_shift = 7                # Font positioning adjustment (vertical offset in pixels)
+font_shift = 0                # Font positioning adjustment (vertical offset in pixels)
 
 [fonts]
 # Font configuration
 # font_path: Directory containing BDF font files (use absolute path)
 # font_name: Font filename (can be changed via web UI)
 # Examples:
-#   macOS:   font_path = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf"
+#   Windows: font_path = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf"
 #   Linux:   font_path = "/home/mike/u8g2/tools/font/bdf"
-#   Windows: font_path = "C:/Users/mike/Documents/fonts"
-font_path = "/home/mike/u8g2/tools/font/bdf"
-font_name = "helvB12.bdf"
+font_path = "/Users/mike/Documents/Code Projects/LED Panels/fonts"
+font_name = "helvB14.bdf"
 
 [files]
 # Data file paths (relative to config directory)
@@ -81,9 +80,16 @@ udp_port = 5568              # UDP port to listen on for JSON messages
 buffer_size = 4096           # Maximum UDP packet size
 top_height = 24              # Height of top section (event name) in pixels
 bottom_height = 40           # Height of bottom section (time) in pixels
-top_font_name = "helvB14.bdf"    # Font for event name (top section)
-bottom_font_name = "helvB24.bdf" # Font for time display (bottom section)
-font_shift = 7               # Font positioning adjustment (vertical offset in pixels)# Hardware configuration for scoreboard (independent of main display)
+top_font_name = "helvB18.bdf"            # Font for event name (top section)
+bottom_font_name = "Roboto-Black-50.bdf" # Font for time display (bottom section)
+
+# Font positioning adjustments (offsets in pixels)
+top_font_shift_vertical = 0       # Vertical offset for top section font
+top_font_shift_horizontal = 0     # Horizontal offset for top section font (adjust if not centered)
+bottom_font_shift_vertical = 1   # Vertical offset for bottom section font
+bottom_font_shift_horizontal = 0 # Horizontal offset for bottom section font (adjust if not centered)
+
+# Hardware configuration for scoreboard (independent of main display)
 width = 64                   # Base panel width in pixels
 height = 32                  # Base panel height in pixels
 chain = 3                    # Panels chained horizontally (3 wide)
