@@ -153,9 +153,26 @@ def render_scoreboard(canvas, graphics, top_font, bottom_font,
     if time_value:
         # Truncate time to fit display width (with 2px margin on each side)
         available_width = canvas_width - 4
-        time_value_display = truncate_text_to_width(bottom_font, time_value, available_width)
+        time_value_display = format_time(time_value)
+        time_value_display = truncate_text_to_width(bottom_font, time_value_display, available_width)
         draw_centered_text(canvas, graphics, bottom_font, bottom_font_metadata, bottom_y_start, bottom_height, canvas_width,
                            time_value_display, white, bottom_font_shift_v)
+
+
+def format_time(time_str: str) -> str:
+    """Format time string to ensure consistent display.
+
+    Args:
+        time_str: Raw time string from message
+
+    Returns:
+        Formatted time string
+    """
+    # Remove any fractional seconds
+    if '.' in time_str:
+        time_str = time_str.split('.')[0]
+
+    return time_str
 
 
 def main():
