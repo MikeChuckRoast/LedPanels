@@ -1,0 +1,94 @@
+[hardware]
+# Physical panel configuration
+width = 64           # Display width in pixels
+height = 32          # Display height in pixels
+chain = 2            # Panels chained horizontally
+parallel = 4         # Panels stacked vertically
+gpio_slowdown = 3    # GPIO slowdown for RGBMatrixOptions (0-4, higher = slower but more stable)
+
+[display]
+# Display layout and timing
+line_height = 24              # Athlete row height in pixels
+header_line_height = 16       # Header row height in pixels
+header_rows = 2               # Number of header rows (allows text wrapping for long event names)
+interval = 2.0                # Seconds per page when paging through athletes
+font_shift = 0                # Font positioning adjustment (vertical offset in pixels)
+
+[fonts]
+# Font configuration
+# font_path: Directory containing BDF font files (use absolute path)
+# font_name: Font filename (can be changed via web UI)
+# Examples:
+#   Windows: font_path = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf"
+#   Linux:   font_path = "/home/mike/u8g2/tools/font/bdf"
+font_path = "/home/mike/LedPanels/fonts"
+font_name = "helvB14.bdf"
+
+[files]
+# Data file paths (relative to config directory)
+lynx_file = "lynx.evt"       # Event timing data file (CSV format from Lynx timing system)
+colors_file = "colors.csv"   # Team color mappings file (affiliation,name,bgcolor,text)
+
+[network]
+# Output backend configuration
+# Only one backend should be enabled at a time: direct matrix control, FPP, or ColorLight
+
+# FPP (Falcon Player Protocol) network output
+# Use this to send display data to a remote FPP instance over the network
+fpp_enabled = false
+fpp_host = "127.0.0.1"       # IP address of FPP receiver
+fpp_port = 4048              # DDP port (default: 4048)
+
+# ColorLight 5A-75B direct Ethernet output
+# Sends frames directly to ColorLight controller via raw Ethernet (requires root/sudo on Linux)
+colorlight_enabled = true
+colorlight_interface = "eth0"  # Network interface name (e.g., eth0, enp0s3, wlan0)
+
+[keyboard]
+# Keyboard input settings for event navigation
+# Leave empty for auto-detection, or specify device path for evdev on Linux
+# Example: "/dev/input/event2"
+device_path = ""
+
+[behavior]
+# Runtime behavior
+once = false  # If true, render once and exit; if false, loop continuously with paging
+
+[monitoring]
+# File monitoring for automatic reload
+# Monitors lynx.evt, current_event.json, and colors.csv for changes
+# When files change, the display automatically reloads the new data
+file_watch_enabled = true    # Enable automatic file monitoring (requires watchdog library)
+poll_interval = 1.0          # Polling interval in seconds (fallback mode only)
+
+[web]
+# Web interface for remote control and configuration
+# Access from any browser on the network: http://<raspberry-pi-ip>:5000
+# Provides pages for viewing/changing current event, editing team colors, and adjusting display settings
+web_enabled = true           # Enable web interface
+web_host = "0.0.0.0"          # Host to bind to (0.0.0.0 = all interfaces, 127.0.0.1 = localhost only)
+web_port = 5000              # Port for web server (default HTTP alternative: 5000)
+
+[scoreboard]
+# UDP scoreboard display settings (separate from main display)
+# Listens for JSON messages on UDP port and displays event name + time
+# Used with udp_scoreboard.py script
+udp_port = 5568              # UDP port to listen on for JSON messages
+buffer_size = 4096           # Maximum UDP packet size
+top_height = 24              # Height of top section (event name) in pixels
+bottom_height = 40           # Height of bottom section (time) in pixels
+top_font_name = "helvB18.bdf"            # Font for event name (top section)
+bottom_font_name = "Roboto-Black-50.bdf" # Font for time display (bottom section)
+
+# Font positioning adjustments (offsets in pixels)
+top_font_shift_vertical = 0       # Vertical offset for top section font
+top_font_shift_horizontal = 0     # Horizontal offset for top section font (adjust if not centered)
+bottom_font_shift_vertical = 1   # Vertical offset for bottom section font
+bottom_font_shift_horizontal = 0 # Horizontal offset for bottom section font (adjust if not centered)
+
+# Hardware configuration for scoreboard (independent of main display)
+width = 64                   # Base panel width in pixels
+height = 32                  # Base panel height in pixels
+chain = 2                    # Panels chained horizontally (3 wide)
+parallel = 2                 # Panels stacked vertically (2 tall)
+gpio_slowdown = 4            # GPIO slowdown for RGBMatrixOptions

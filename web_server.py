@@ -14,10 +14,11 @@ import os
 import re
 import shutil
 import threading
+import tomllib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import toml
+import tomli_w
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from event_parser import (load_affiliation_colors, parse_hex_color,
@@ -407,8 +408,8 @@ class WebServer:
         """
         try:
             settings_file = self.config_dir / "settings.toml"
-            with open(settings_file, 'r', encoding='utf-8') as f:
-                config = toml.load(f)
+            with open(settings_file, 'rb') as f:
+                config = tomllib.load(f)
 
             display_settings = config.get('display', {})
             fonts_settings = config.get('fonts', {})
@@ -476,8 +477,8 @@ class WebServer:
 
             # Load current settings
             settings_file = self.config_dir / "settings.toml"
-            with open(settings_file, 'r', encoding='utf-8') as f:
-                config = toml.load(f)
+            with open(settings_file, 'rb') as f:
+                config = tomllib.load(f)
 
             # Update display section
             if 'display' not in config:
@@ -492,8 +493,8 @@ class WebServer:
                 logging.info(f"Updated font_name: {font_name}")
 
             # Write back to file
-            with open(settings_file, 'w', encoding='utf-8') as f:
-                toml.dump(config, f)
+            with open(settings_file, 'wb') as f:
+                tomli_w.dump(config, f)
 
             # Prepare response
             response_display = config['display'].copy()
