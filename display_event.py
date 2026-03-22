@@ -217,7 +217,7 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
             # Draw lane and name in columns
             lane_txt = (athlete.get("lane") or "").strip()
             # Baseline for this row
-            y_txt = calculate_text_baseline(y0, line_height, font, font_shift)
+            y_txt = calculate_text_baseline(y0, line_height, font_metadata, font_shift)
             # Draw lane (left column)
             graphics.DrawText(canvas, font, lane_x, y_txt, text_color, lane_txt)
 
