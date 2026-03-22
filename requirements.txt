@@ -1,0 +1,6 @@
+# Core runtime dependencies - installs on all platforms
+
+flask>=3.0
+tomli_w>=1.0
+watchdog>=3.0
+Pillow>=10.0

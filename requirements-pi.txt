@@ -1,0 +1,6 @@
+# Raspberry Pi / Linux hardware dependencies
+# Install on Pi instead of requirements.txt (includes everything)
+
+-r requirements.txt
+evdev>=1.6
+rgbmatrix>=0.0.1
