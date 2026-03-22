@@ -737,6 +737,22 @@ def main():
                 else:
                     logging.warning("Could not reload colors.csv - continuing with current colors")
 
+                # Reload settings.toml so display settings (font_shift, line_height, etc.) update live
+                new_settings = load_file_with_retry(
+                    lambda: load_settings(config_dir),
+                    "settings.toml"
+                )
+                if new_settings is not None:
+                    disp = new_settings['display']
+                    new_fonts = new_settings['fonts']
+                    new_font_path = os.path.join(new_fonts['font_path'], new_fonts['font_name'])
+                    if new_font_path != args.font:
+                        args.font = new_font_path
+                        logging.info(f"Font updated: {args.font}")
+                    logging.info("Display settings reloaded from settings.toml")
+                else:
+                    logging.warning("Could not reload settings.toml - continuing with current display settings")
+
                 # Reload schedule (lynx.sch) if it exists
                 schedule_path = os.path.join(config_dir, "lynx.sch")
                 if os.path.exists(schedule_path):
