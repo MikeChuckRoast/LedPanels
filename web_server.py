@@ -444,7 +444,8 @@ class WebServer:
             font_name = new_display.pop('font_name', None)
 
             # Validate display settings
-            int_fields = ['line_height', 'header_line_height', 'header_rows', 'font_shift']
+            int_fields = ['line_height', 'header_line_height', 'header_rows']
+            signed_int_fields = ['font_shift']  # Can be 0 or negative
             float_fields = ['interval']
 
             for field in int_fields:
@@ -454,6 +455,13 @@ class WebServer:
                         if value <= 0:
                             return jsonify({'error': f'{field} must be a positive integer'}), 400
                         new_display[field] = value
+                    except (ValueError, TypeError):
+                        return jsonify({'error': f'{field} must be an integer'}), 400
+
+            for field in signed_int_fields:
+                if field in new_display:
+                    try:
+                        new_display[field] = int(new_display[field])
                     except (ValueError, TypeError):
                         return jsonify({'error': f'{field} must be an integer'}), 400
 

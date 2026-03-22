@@ -66,7 +66,7 @@ line_height = 24              # Athlete row height in pixels
 header_line_height = 16       # Header row height in pixels
 header_rows = 1               # Number of header rows (allows text wrapping)
 interval = 2.0                # Seconds per page when paging
-font_shift = 7                # Font positioning adjustment (vertical)
+font_shift = 0                # Font positioning adjustment (vertical)
 
 [fonts]
 # Font configuration (use absolute path for font_path)
@@ -115,7 +115,7 @@ top_height = 24              # Height of top section (event name) in pixels
 bottom_height = 40           # Height of bottom section (time) in pixels
 top_font_name = "helvB12.bdf"    # Font for event name
 bottom_font_name = "helvB18.bdf" # Font for time display
-font_shift = 7               # Font positioning adjustment (vertical offset)
+font_shift = 0               # Font positioning adjustment (vertical offset)
 # Hardware configuration for scoreboard (3 panels wide x 2 panels tall)
 width = 64                   # Base panel width
 height = 32                  # Base panel height
