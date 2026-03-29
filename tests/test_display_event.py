@@ -375,3 +375,262 @@ class TestScheduleMode:
         # Advance
         # Verify moves to next in schedule
         pass
+
+
+class TestConditionalEventJump:
+    """Tests for conditional jump behavior when current_event.json is updated.
+
+    When a new event reference arrives (via file reload), the display should:
+    - Jump forward if the display is behind the new reference
+    - Stay put if the display is at or ahead of the new reference
+    - Update the keyboard navigation floor regardless
+    """
+
+    def _simulate_reload_jump(self, displayed, incoming, schedule=None):
+        """Simulate the conditional jump logic from the main loop.
+
+        Args:
+            displayed: (event, round, heat) tuple of what's currently displayed
+            incoming: (event, round, heat) tuple from current_event.json
+            schedule: optional list of (event, round, heat) tuples for schedule mode
+
+        Returns:
+            dict with 'jumped' (bool), 'display_after' (tuple), 'starting_index' (int or None)
+        """
+        from schedule_parser import (find_nearest_schedule_index,
+                                     find_schedule_index)
+
+        displayed_event_tuple = displayed
+        args_event, args_round, current_heat = displayed
+
+        incoming_event, incoming_round, incoming_heat = incoming
+
+        # Always update reference floor
+        original_event = incoming_event
+        original_round = incoming_round
+        original_heat = incoming_heat
+
+        jumped = False
+        starting_schedule_index = None
+
+        if schedule:
+            # Calculate starting_schedule_index from incoming reference
+            starting_schedule_index = find_schedule_index(
+                schedule, incoming_event, incoming_round, incoming_heat
+            )
+            if starting_schedule_index == -1:
+                starting_schedule_index = find_nearest_schedule_index(
+                    schedule, incoming_event, incoming_round, incoming_heat
+                )
+
+            # Calculate current_schedule_index for displayed event
+            current_schedule_index = find_schedule_index(
+                schedule, displayed[0], displayed[1], displayed[2]
+            )
+            if current_schedule_index == -1:
+                current_schedule_index = find_nearest_schedule_index(
+                    schedule, displayed[0], displayed[1], displayed[2]
+                )
+                if current_schedule_index is None:
+                    current_schedule_index = len(schedule) - 1
+
+            # Conditional jump
+            if current_schedule_index < starting_schedule_index:
+                args_event, args_round, current_heat = schedule[starting_schedule_index]
+                jumped = True
+        else:
+            # No schedule: lexicographic tuple comparison
+            incoming_tuple = (incoming_event, incoming_round, incoming_heat)
+            if displayed_event_tuple < incoming_tuple:
+                args_event = incoming_event
+                args_round = incoming_round
+                current_heat = incoming_heat
+                jumped = True
+
+        return {
+            'jumped': jumped,
+            'display_after': (args_event, args_round, current_heat),
+            'starting_index': starting_schedule_index,
+            'reference': (original_event, original_round, original_heat),
+        }
+
+    # --- No-schedule (tuple comparison) tests ---
+
+    def test_no_schedule_display_behind_jumps_forward(self):
+        """Display at event 3, reference updates to event 5 -> jumps to 5."""
+        result = self._simulate_reload_jump(
+            displayed=(3, 1, 1),
+            incoming=(5, 1, 1),
+        )
+        assert result['jumped'] is True
+        assert result['display_after'] == (5, 1, 1)
+
+    def test_no_schedule_display_ahead_stays(self):
+        """Display at event 5, reference updates to event 3 -> stays on 5."""
+        result = self._simulate_reload_jump(
+            displayed=(5, 1, 1),
+            incoming=(3, 1, 1),
+        )
+        assert result['jumped'] is False
+        assert result['display_after'] == (5, 1, 1)
+
+    def test_no_schedule_display_equal_stays(self):
+        """Display at event 5, reference updates to event 5 -> no jump."""
+        result = self._simulate_reload_jump(
+            displayed=(5, 1, 1),
+            incoming=(5, 1, 1),
+        )
+        assert result['jumped'] is False
+        assert result['display_after'] == (5, 1, 1)
+
+    def test_no_schedule_heat_behind_jumps(self):
+        """Display at (3,1,1), reference to (3,1,2) -> jumps (same event, later heat)."""
+        result = self._simulate_reload_jump(
+            displayed=(3, 1, 1),
+            incoming=(3, 1, 2),
+        )
+        assert result['jumped'] is True
+        assert result['display_after'] == (3, 1, 2)
+
+    def test_no_schedule_heat_ahead_stays(self):
+        """Display at (3,1,3), reference to (3,1,1) -> stays."""
+        result = self._simulate_reload_jump(
+            displayed=(3, 1, 3),
+            incoming=(3, 1, 1),
+        )
+        assert result['jumped'] is False
+        assert result['display_after'] == (3, 1, 3)
+
+    def test_no_schedule_cross_event_behind_jumps(self):
+        """Display at (3,1,1), reference to (5,1,2) -> jumps (different event)."""
+        result = self._simulate_reload_jump(
+            displayed=(3, 1, 1),
+            incoming=(5, 1, 2),
+        )
+        assert result['jumped'] is True
+        assert result['display_after'] == (5, 1, 2)
+
+    def test_no_schedule_cross_event_ahead_stays(self):
+        """Display at (5,1,3), reference to (3,1,1) -> stays."""
+        result = self._simulate_reload_jump(
+            displayed=(5, 1, 3),
+            incoming=(3, 1, 1),
+        )
+        assert result['jumped'] is False
+        assert result['display_after'] == (5, 1, 3)
+
+    def test_no_schedule_reference_always_updated(self):
+        """Reference floor is always updated regardless of jump."""
+        result = self._simulate_reload_jump(
+            displayed=(5, 1, 1),
+            incoming=(3, 1, 1),
+        )
+        assert result['reference'] == (3, 1, 1)
+
+    # --- Schedule-based tests ---
+
+    def test_schedule_display_behind_jumps_forward(self):
+        """Schedule mode: display behind reference -> jumps."""
+        schedule = [(2, 1, 1), (5, 1, 1), (7, 1, 1), (1, 1, 1), (3, 1, 1), (6, 1, 1)]
+        result = self._simulate_reload_jump(
+            displayed=(2, 1, 1),  # index 0
+            incoming=(7, 1, 1),   # index 2
+            schedule=schedule,
+        )
+        assert result['jumped'] is True
+        assert result['display_after'] == (7, 1, 1)
+
+    def test_schedule_display_ahead_stays(self):
+        """Schedule mode: display ahead of reference -> stays."""
+        schedule = [(2, 1, 1), (5, 1, 1), (7, 1, 1), (1, 1, 1), (3, 1, 1), (6, 1, 1)]
+        result = self._simulate_reload_jump(
+            displayed=(3, 1, 1),  # index 4
+            incoming=(5, 1, 1),   # index 1
+            schedule=schedule,
+        )
+        assert result['jumped'] is False
+        assert result['display_after'] == (3, 1, 1)
+
+    def test_schedule_display_equal_stays(self):
+        """Schedule mode: display at same position as reference -> stays."""
+        schedule = [(2, 1, 1), (5, 1, 1), (7, 1, 1), (1, 1, 1), (3, 1, 1), (6, 1, 1)]
+        result = self._simulate_reload_jump(
+            displayed=(5, 1, 1),  # index 1
+            incoming=(5, 1, 1),   # index 1
+            schedule=schedule,
+        )
+        assert result['jumped'] is False
+        assert result['display_after'] == (5, 1, 1)
+
+    def test_schedule_starting_index_updated(self):
+        """Schedule mode: starting_index reflects the incoming reference."""
+        schedule = [(2, 1, 1), (5, 1, 1), (7, 1, 1), (1, 1, 1), (3, 1, 1), (6, 1, 1)]
+        result = self._simulate_reload_jump(
+            displayed=(6, 1, 1),
+            incoming=(7, 1, 1),
+            schedule=schedule,
+        )
+        assert result['starting_index'] == 2  # index of (7,1,1)
+
+
+class TestConditionalJumpKeyboardFloor:
+    """Tests for keyboard navigation floor after reference update."""
+
+    def test_heat_increment_reset_returns_to_reference(self):
+        """Heat-increment reset returns to reference event, not just heat."""
+        # Simulate: reference updated to (3,1,1), display stayed at (5,1,3)
+        # User presses reset -> should go to (3,1,1)
+        original_event, original_round, original_heat = 3, 1, 1
+        args_event, args_round, current_heat = 5, 1, 3
+
+        # Simulate reset logic from display_event.py
+        if args_event != original_event or args_round != original_round or current_heat != original_heat:
+            args_event = original_event
+            args_round = original_round
+            current_heat = original_heat
+
+        assert (args_event, args_round, current_heat) == (3, 1, 1)
+
+    def test_heat_increment_reset_noop_when_at_reference(self):
+        """Heat-increment reset is a no-op when already at reference."""
+        original_event, original_round, original_heat = 3, 1, 1
+        args_event, args_round, current_heat = 3, 1, 1
+
+        changed = False
+        if args_event != original_event or args_round != original_round or current_heat != original_heat:
+            args_event = original_event
+            args_round = original_round
+            current_heat = original_heat
+            changed = True
+
+        assert changed is False
+        assert (args_event, args_round, current_heat) == (3, 1, 1)
+
+    def test_heat_increment_prev_respects_floor(self):
+        """Heat-increment prev can't go below original_heat within same event."""
+        original_heat = 2
+        current_heat = 2
+        args_event, args_round = 3, 1
+        events = {(3, 1, 1): {}, (3, 1, 2): {}, (3, 1, 3): {}}
+
+        # Simulate prev logic
+        prev_heat = max(original_heat, current_heat - 1)
+        if prev_heat != current_heat and (args_event, args_round, prev_heat) in events:
+            current_heat = prev_heat
+
+        # Should stay at heat 2 (floor)
+        assert current_heat == 2
+
+    def test_schedule_prev_respects_starting_index(self):
+        """Schedule prev can't go before starting_schedule_index."""
+        schedule = [(2, 1, 1), (5, 1, 1), (7, 1, 1), (1, 1, 1), (3, 1, 1)]
+        starting_schedule_index = 2  # reference at (7,1,1)
+        current_schedule_index = 2   # display also at (7,1,1)
+
+        # Simulate prev
+        if current_schedule_index > starting_schedule_index:
+            current_schedule_index -= 1
+
+        # Should stay at index 2
+        assert current_schedule_index == 2
+        assert schedule[current_schedule_index] == (7, 1, 1)

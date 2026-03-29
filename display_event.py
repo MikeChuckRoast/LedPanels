@@ -702,6 +702,16 @@ def main():
                 # File reload requested - reload all data files
                 logging.info("Reloading event data from files...")
 
+                # Phase 1: Capture currently displayed state before reload
+                displayed_event_tuple = (args.event, args.round, current_heat)
+                displayed_schedule_index = current_schedule_index
+
+                # Track whether current_event.json changed
+                current_event_changed = False
+                incoming_event = args.event
+                incoming_round = args.round
+                incoming_heat = current_heat
+
                 # Reload lynx.evt with retry logic
                 new_events = load_file_with_retry(
                     lambda: parse_lynx_file(args.file),
@@ -718,12 +728,16 @@ def main():
                     "current_event.json"
                 )
                 if new_current_event is not None:
-                    # Update current heat from reloaded file
-                    args.event = new_current_event['event']
-                    args.round = new_current_event['round']
-                    current_heat = new_current_event['heat']
-                    original_heat = current_heat
-                    logging.info(f"Updated to Event={args.event}, Round={args.round}, Heat={current_heat}")
+                    # Store incoming values - don't update display yet (conditional jump later)
+                    incoming_event = new_current_event['event']
+                    incoming_round = new_current_event['round']
+                    incoming_heat = new_current_event['heat']
+                    current_event_changed = True
+                    # Always update the reference floor (keyboard can't go before this)
+                    original_event = incoming_event
+                    original_round = incoming_round
+                    original_heat = incoming_heat
+                    logging.info(f"Reference updated to Event={incoming_event}, Round={incoming_round}, Heat={incoming_heat}")
                 else:
                     logging.warning("Could not reload current_event.json - continuing with current event selection")
 
@@ -766,36 +780,36 @@ def main():
                         if validated_schedule:
                             schedule = validated_schedule
 
-                            # Recalculate starting position based on reloaded current event
-                            starting_schedule_index = find_schedule_index(schedule, args.event, args.round, current_heat)
+                            # Calculate starting_schedule_index (reference floor) from incoming event
+                            starting_schedule_index = find_schedule_index(schedule, incoming_event, incoming_round, incoming_heat)
                             if starting_schedule_index == -1:
-                                # Current event not in schedule, find nearest
                                 starting_schedule_index = find_nearest_schedule_index(
-                                    schedule, args.event, args.round, current_heat
+                                    schedule, incoming_event, incoming_round, incoming_heat
                                 )
                                 if starting_schedule_index == -1:
-                                    # Current event is past all scheduled events
-                                    logging.warning("Current event is past all scheduled events - disabling schedule navigation")
+                                    logging.warning("Reference event is past all scheduled events - disabling schedule navigation")
                                     schedule = []
                                 else:
-                                    # Switch to the nearest event
-                                    evt, rnd, ht = schedule[starting_schedule_index]
-                                    args.event = evt
-                                    args.round = rnd
-                                    current_heat = ht
-                                    position_text = get_schedule_position_text(schedule, evt, rnd, ht)
-                                    logging.info(f"Current event not in schedule - switched to nearest: {position_text}")
-                            else:
-                                evt, rnd, ht = schedule[starting_schedule_index]
-                                position_text = get_schedule_position_text(schedule, evt, rnd, ht)
-                                logging.info(f"Schedule reloaded - starting at: {position_text}")
+                                    # Update incoming to the nearest valid schedule entry
+                                    incoming_event, incoming_round, incoming_heat = schedule[starting_schedule_index]
+                                    original_event = incoming_event
+                                    original_round = incoming_round
+                                    original_heat = incoming_heat
+                                    position_text = get_schedule_position_text(schedule, incoming_event, incoming_round, incoming_heat)
+                                    logging.info(f"Reference event not in schedule - nearest: {position_text}")
 
-                            # Reset to new starting position
+                            # Recalculate current_schedule_index for the displayed event in the new schedule
                             if schedule:
-                                current_schedule_index = starting_schedule_index
-                                original_event = args.event
-                                original_round = args.round
-                                original_heat = current_heat
+                                displayed_schedule_index = find_schedule_index(
+                                    schedule, displayed_event_tuple[0], displayed_event_tuple[1], displayed_event_tuple[2]
+                                )
+                                if displayed_schedule_index == -1:
+                                    displayed_schedule_index = find_nearest_schedule_index(
+                                        schedule, displayed_event_tuple[0], displayed_event_tuple[1], displayed_event_tuple[2]
+                                    )
+                                    if displayed_schedule_index is None:
+                                        displayed_schedule_index = len(schedule) - 1
+                                current_schedule_index = displayed_schedule_index
                         else:
                             logging.warning("No valid schedule entries after reload - disabling schedule navigation")
                             schedule = []
@@ -806,6 +820,30 @@ def main():
                     if schedule:
                         logging.info("Schedule file removed - switching to heat increment mode")
                         schedule = []
+
+                # Phase 4: Conditional jump - only jump display forward
+                if current_event_changed:
+                    if schedule:
+                        # Schedule mode: compare schedule positions
+                        if current_schedule_index < starting_schedule_index:
+                            # Display is behind reference - jump forward
+                            current_schedule_index = starting_schedule_index
+                            args.event, args.round, current_heat = schedule[current_schedule_index]
+                            position_text = get_schedule_position_text(schedule, args.event, args.round, current_heat)
+                            logging.info(f"Display behind reference - jumping forward to: {position_text}")
+                        else:
+                            logging.info(f"Display at or ahead of reference (pos {current_schedule_index + 1} >= ref {starting_schedule_index + 1}) - staying put")
+                    else:
+                        # No schedule: lexicographic tuple comparison
+                        incoming_tuple = (incoming_event, incoming_round, incoming_heat)
+                        if displayed_event_tuple < incoming_tuple:
+                            # Display is behind reference - jump forward
+                            args.event = incoming_event
+                            args.round = incoming_round
+                            current_heat = incoming_heat
+                            logging.info(f"Display behind reference - jumping forward to Event={args.event}, Round={args.round}, Heat={current_heat}")
+                        else:
+                            logging.info(f"Display at or ahead of reference {incoming_tuple} - staying put at {displayed_event_tuple}")
 
                 logging.info("Reload complete - resuming display")
                 continue
@@ -860,12 +898,14 @@ def main():
                         else:
                             logging.info("Cannot go to heat %d, staying on heat %d", prev_heat, current_heat)
                     elif heat_change_request == 'reset':
-                        # Reset to original heat
-                        if current_heat != original_heat:
+                        # Reset to reference event (latest current_event.json)
+                        if args.event != original_event or args.round != original_round or current_heat != original_heat:
+                            args.event = original_event
+                            args.round = original_round
                             current_heat = original_heat
-                            logging.info("Resetting to original heat %d", current_heat)
+                            logging.info("Resetting to reference Event=%d, Round=%d, Heat=%d", args.event, args.round, current_heat)
                         else:
-                            logging.info("Already at original heat %d", current_heat)
+                            logging.info("Already at reference Event=%d, Round=%d, Heat=%d", args.event, args.round, current_heat)
 
                 heat_change_request = None  # Clear the request
     except Exception as e:

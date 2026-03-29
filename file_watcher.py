@@ -24,6 +24,7 @@ try:
 except ImportError:
     WATCHDOG_AVAILABLE = False
     FileSystemEventHandler = object
+    FileSystemEvent = None
     logging.warning("watchdog library not available - file watching disabled")
 
 
