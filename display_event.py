@@ -74,6 +74,10 @@ heat_change_request = None  # None, 'next', 'prev', or 'reset'
 file_reload_lock = threading.Lock()
 file_reload_requested = False
 
+# Global state for display power (on/off)
+display_power_lock = threading.Lock()
+display_power_on = True
+
 
 # Note: Parsing and formatting functions moved to event_parser.py
 # Matrix backend functions moved to matrix_backend.py and fpp_output.py
@@ -290,6 +294,32 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
                     if file_reload_requested:
                         matrix.Clear()
                         return False  # Signal to reload
+
+                # Check for display power off
+                power_is_on = True
+                with display_power_lock:
+                    power_is_on = display_power_on
+                if not power_is_on:
+                    matrix.Clear()
+                    canvas = matrix.SwapOnVSync(canvas)
+                    # Stay in sleep loop but don't advance pages
+                    while True:
+                        time.sleep(check_interval)
+                        with display_power_lock:
+                            if display_power_on:
+                                break
+                        with heat_change_lock:
+                            if heat_change_request is not None:
+                                matrix.Clear()
+                                return False
+                        with file_reload_lock:
+                            if file_reload_requested:
+                                matrix.Clear()
+                                return False
+                    # Power back on — re-render current page
+                    render_page(page_idx)
+                    elapsed = 0.0
+                    continue
 
                 time.sleep(check_interval)
                 elapsed += check_interval
@@ -564,12 +594,26 @@ def main():
         with file_reload_lock:
             file_reload_requested = True
 
+    # Display power callbacks for web server
+    def get_display_power():
+        global display_power_on
+        with display_power_lock:
+            return display_power_on
+
+    def set_display_power(state):
+        global display_power_on
+        with display_power_lock:
+            display_power_on = state
+        logging.info(f"Display power set to {'on' if state else 'off'}")
+
     # Start web server if enabled
     web_server = None
     if settings.get('web', {}).get('web_enabled', False):
         web_host = settings.get('web', {}).get('web_host', '0.0.0.0')
         web_port = settings.get('web', {}).get('web_port', 5000)
-        web_server = start_web_server(config_dir, web_host, web_port)
+        web_server = start_web_server(config_dir, web_host, web_port,
+                                      get_display_power=get_display_power,
+                                      set_display_power=set_display_power)
         if web_server:
             logging.info(f"Web interface available at http://{web_host}:{web_port}")
         else:

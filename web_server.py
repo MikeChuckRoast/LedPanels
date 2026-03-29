@@ -29,17 +29,22 @@ from schedule_parser import parse_schedule, validate_schedule_entries
 class WebServer:
     """Web server for LED display control interface."""
 
-    def __init__(self, config_dir: str, host: str = "0.0.0.0", port: int = 5000):
+    def __init__(self, config_dir: str, host: str = "0.0.0.0", port: int = 5000,
+                 get_display_power=None, set_display_power=None):
         """Initialize web server.
 
         Args:
             config_dir: Path to configuration directory
             host: Host to bind to
             port: Port to listen on
+            get_display_power: Callback returning current display power state (bool)
+            set_display_power: Callback to set display power state (bool)
         """
         self.config_dir = Path(config_dir)
         self.host = host
         self.port = port
+        self.get_display_power = get_display_power
+        self.set_display_power = set_display_power
         self.app = Flask(__name__,
                         static_folder='static',
                         template_folder='templates')
@@ -112,6 +117,14 @@ class WebServer:
         @self.app.route('/api/upload/combined', methods=['POST'])
         def upload_combined():
             return self._upload_combined()
+
+        @self.app.route('/api/display_power', methods=['GET'])
+        def get_display_power():
+            return self._get_display_power()
+
+        @self.app.route('/api/display_power', methods=['POST'])
+        def set_display_power():
+            return self._set_display_power()
 
     def _get_events(self) -> Tuple[Dict, int]:
         """Get list of events from lynx.evt file.
@@ -765,6 +778,29 @@ class WebServer:
             logging.error(f"Error uploading combined files: {e}")
             return jsonify({'error': str(e)}), 500
 
+    def _get_display_power(self):
+        """Get current display power state."""
+        if self.get_display_power is None:
+            return jsonify({'power': True, 'available': False}), 200
+        return jsonify({'power': self.get_display_power(), 'available': True}), 200
+
+    def _set_display_power(self):
+        """Set display power state."""
+        if self.set_display_power is None:
+            return jsonify({'error': 'Display power control not available'}), 503
+
+        data = request.get_json()
+        if data is None or 'power' not in data:
+            return jsonify({'error': 'Missing required field: power'}), 400
+
+        if not isinstance(data['power'], bool):
+            return jsonify({'error': 'Field "power" must be a boolean'}), 400
+
+        self.set_display_power(data['power'])
+        state = 'on' if data['power'] else 'off'
+        logging.info(f"Display power set to {state} via web API")
+        return jsonify({'power': data['power'], 'status': f'Display turned {state}'}), 200
+
     def start(self):
         """Start the web server in a background thread."""
         if self.server_thread is not None and self.server_thread.is_alive():
@@ -784,19 +820,24 @@ class WebServer:
         logging.info("Web server stopping (note: Flask server will continue until main process exits)")
 
 
-def start_web_server(config_dir: str, host: str = "0.0.0.0", port: int = 5000) -> Optional[WebServer]:
+def start_web_server(config_dir: str, host: str = "0.0.0.0", port: int = 5000,
+                     get_display_power=None, set_display_power=None) -> Optional[WebServer]:
     """Start the web server.
 
     Args:
         config_dir: Path to configuration directory
         host: Host to bind to
         port: Port to listen on
+        get_display_power: Callback returning current display power state
+        set_display_power: Callback to set display power state
 
     Returns:
         WebServer instance if started successfully, None otherwise
     """
     try:
-        server = WebServer(config_dir, host, port)
+        server = WebServer(config_dir, host, port,
+                          get_display_power=get_display_power,
+                          set_display_power=set_display_power)
         server.start()
         return server
     except Exception as e:

@@ -497,3 +497,133 @@ class TestWebServerFileUpload:
         # Verify schedule file was not created
         schedule_file = Path(populated_config_dir) / "lynx.sch"
         assert not schedule_file.exists()
+
+
+class TestDisplayPowerAPI:
+    """Tests for display power on/off API endpoints."""
+
+    def test_get_display_power_default_on(self, populated_config_dir):
+        """Test GET /api/display_power returns true by default."""
+        from web_server import WebServer
+
+        get_power = lambda: True
+        set_power = lambda state: None
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5030,
+                          get_display_power=get_power, set_display_power=set_power)
+
+        with server.app.test_client() as client:
+            response = client.get('/api/display_power')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['power'] is True
+            assert data['available'] is True
+
+    def test_get_display_power_when_off(self, populated_config_dir):
+        """Test GET /api/display_power returns false when display is off."""
+        from web_server import WebServer
+
+        get_power = lambda: False
+        set_power = lambda state: None
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5031,
+                          get_display_power=get_power, set_display_power=set_power)
+
+        with server.app.test_client() as client:
+            response = client.get('/api/display_power')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['power'] is False
+
+    def test_get_display_power_no_callbacks(self, populated_config_dir):
+        """Test GET /api/display_power without callbacks returns default."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5032)
+
+        with server.app.test_client() as client:
+            response = client.get('/api/display_power')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['power'] is True
+            assert data['available'] is False
+
+    def test_set_display_power_off(self, populated_config_dir):
+        """Test POST /api/display_power to turn off."""
+        from web_server import WebServer
+
+        power_state = [True]
+        get_power = lambda: power_state[0]
+        def set_power(state):
+            power_state[0] = state
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5033,
+                          get_display_power=get_power, set_display_power=set_power)
+
+        with server.app.test_client() as client:
+            response = client.post('/api/display_power',
+                                  data=json.dumps({'power': False}),
+                                  content_type='application/json')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['power'] is False
+            assert power_state[0] is False
+
+    def test_set_display_power_on(self, populated_config_dir):
+        """Test POST /api/display_power to turn on."""
+        from web_server import WebServer
+
+        power_state = [False]
+        get_power = lambda: power_state[0]
+        def set_power(state):
+            power_state[0] = state
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5034,
+                          get_display_power=get_power, set_display_power=set_power)
+
+        with server.app.test_client() as client:
+            response = client.post('/api/display_power',
+                                  data=json.dumps({'power': True}),
+                                  content_type='application/json')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['power'] is True
+            assert power_state[0] is True
+
+    def test_set_display_power_missing_field(self, populated_config_dir):
+        """Test POST /api/display_power with missing power field returns 400."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5035,
+                          get_display_power=lambda: True,
+                          set_display_power=lambda s: None)
+
+        with server.app.test_client() as client:
+            response = client.post('/api/display_power',
+                                  data=json.dumps({}),
+                                  content_type='application/json')
+            assert response.status_code == 400
+
+    def test_set_display_power_invalid_type(self, populated_config_dir):
+        """Test POST /api/display_power with non-boolean returns 400."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5036,
+                          get_display_power=lambda: True,
+                          set_display_power=lambda s: None)
+
+        with server.app.test_client() as client:
+            response = client.post('/api/display_power',
+                                  data=json.dumps({'power': 'yes'}),
+                                  content_type='application/json')
+            assert response.status_code == 400
+
+    def test_set_display_power_no_callbacks(self, populated_config_dir):
+        """Test POST /api/display_power without callbacks returns 503."""
+        from web_server import WebServer
+
+        server = WebServer(str(populated_config_dir), host="127.0.0.1", port=5037)
+
+        with server.app.test_client() as client:
+            response = client.post('/api/display_power',
+                                  data=json.dumps({'power': False}),
+                                  content_type='application/json')
+            assert response.status_code == 503

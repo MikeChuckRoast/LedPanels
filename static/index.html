@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -23,7 +23,23 @@
 
       <div class="grid">
         <div class="card">
-          <h2>Current Event</h2>
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            "
+          >
+            <h2 style="margin: 0">Current Event</h2>
+            <button
+              id="power-toggle"
+              onclick="toggleDisplayPower()"
+              class="power-btn power-on"
+              title="Toggle display power"
+            >
+              Display On
+            </button>
+          </div>
           <div id="current-event-info">
             <div class="loading">Loading...</div>
           </div>
@@ -98,9 +114,8 @@
                 `;
           return data;
         } catch (error) {
-          document.getElementById(
-            "current-event-info"
-          ).innerHTML = `<div class="alert alert-error">Error loading current event: ${error.message}</div>`;
+          document.getElementById("current-event-info").innerHTML =
+            `<div class="alert alert-error">Error loading current event: ${error.message}</div>`;
           return null;
         }
       }
@@ -133,20 +148,20 @@
               return `
                         <div class="event-item ${isActive ? "active" : ""}" 
                              onclick="selectEvent(${event.event}, ${
-                event.round
-              }, ${event.heat})">
+                               event.round
+                             }, ${event.heat})">
                             <div class="event-header">
                                 Event ${event.event} - Round ${
-                event.round
-              } - Heat ${event.heat}${scheduleInfo}
+                                  event.round
+                                } - Heat ${event.heat}${scheduleInfo}
                             </div>
                             <div style="margin-top: 5px; font-weight: 500;">${
                               event.name
                             }</div>
                             <div class="event-details">
                                 ${event.athlete_count} athlete${
-                event.athlete_count !== 1 ? "s" : ""
-              }
+                                  event.athlete_count !== 1 ? "s" : ""
+                                }
                             </div>
                         </div>
                     `;
@@ -155,9 +170,8 @@
 
           container.innerHTML = `<div class="event-list">${eventsHTML}</div>`;
         } catch (error) {
-          document.getElementById(
-            "events-list"
-          ).innerHTML = `<div class="alert alert-error">Error loading events: ${error.message}</div>`;
+          document.getElementById("events-list").innerHTML =
+            `<div class="alert alert-error">Error loading events: ${error.message}</div>`;
         }
       }
 
@@ -166,7 +180,7 @@
         try {
           await postAPI("/api/current_event", { event, round, heat });
           showAlert(
-            `Event ${event}, Round ${round}, Heat ${heat} selected successfully!`
+            `Event ${event}, Round ${round}, Heat ${heat} selected successfully!`,
           );
           // Reload to update UI
           await loadEvents();
@@ -175,9 +189,47 @@
         }
       }
 
+      // Display power control
+      let displayPowerOn = true;
+
+      async function loadDisplayPower() {
+        try {
+          const data = await fetchAPI("/api/display_power");
+          displayPowerOn = data.power;
+          updatePowerButton();
+        } catch (error) {
+          console.error("Error loading display power state:", error);
+        }
+      }
+
+      function updatePowerButton() {
+        const btn = document.getElementById("power-toggle");
+        if (!btn) return;
+        if (displayPowerOn) {
+          btn.textContent = "Display On";
+          btn.className = "power-btn power-on";
+        } else {
+          btn.textContent = "Display Off";
+          btn.className = "power-btn power-off";
+        }
+      }
+
+      async function toggleDisplayPower() {
+        try {
+          const newState = !displayPowerOn;
+          await postAPI("/api/display_power", { power: newState });
+          displayPowerOn = newState;
+          updatePowerButton();
+          showAlert(`Display turned ${newState ? "on" : "off"}`);
+        } catch (error) {
+          showAlert(`Error toggling display: ${error.message}`, "error");
+        }
+      }
+
       // Initialize on page load
       document.addEventListener("DOMContentLoaded", () => {
         loadEvents();
+        loadDisplayPower();
       });
     </script>
   </body>

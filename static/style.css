@@ -18,8 +18,9 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
   background-color: var(--bg-color);
   color: var(--text-color);
   line-height: 1.6;
@@ -263,6 +264,37 @@ tr:hover {
 .status-active {
   background-color: #d4edda;
   color: #155724;
+}
+
+/* Display power toggle button */
+.power-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
+}
+
+.power-on {
+  background-color: var(--success-color);
+  color: white;
+}
+
+.power-on:hover {
+  background-color: #219a52;
+}
+
+.power-off {
+  background-color: #95a5a6;
+  color: white;
+}
+
+.power-off:hover {
+  background-color: #7f8c8d;
 }
 
 input[type="color"] {
