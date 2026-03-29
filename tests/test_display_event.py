@@ -400,6 +400,69 @@ class TestKeyboardIntegration:
         pass
 
 
+class TestDisplayState:
+    """Tests for the DisplayState thread-safe state container."""
+
+    def test_initial_state(self):
+        """Test that DisplayState initialises with correct defaults."""
+        from display_event import DisplayState
+        s = DisplayState()
+        assert s.get_heat_change_request() is None
+        assert s.has_heat_change_request() is False
+        assert s.has_file_reload_request() is False
+        assert s.get_display_power() is True
+        assert s.is_network_connected() is True
+
+    def test_heat_change_request_roundtrip(self):
+        """Test request, peek, and consume for heat change."""
+        from display_event import DisplayState
+        s = DisplayState()
+        s.request_heat_change('next')
+        assert s.has_heat_change_request() is True
+        assert s.get_heat_change_request() == 'next'
+        # consume clears
+        assert s.consume_heat_change_request() == 'next'
+        assert s.has_heat_change_request() is False
+        assert s.consume_heat_change_request() is None
+
+    def test_file_reload_roundtrip(self):
+        """Test request and consume for file reload."""
+        from display_event import DisplayState
+        s = DisplayState()
+        assert s.consume_file_reload_request() is False
+        s.request_file_reload()
+        assert s.has_file_reload_request() is True
+        assert s.consume_file_reload_request() is True
+        # cleared after consume
+        assert s.has_file_reload_request() is False
+
+    def test_display_power_toggle(self):
+        """Test display power on/off."""
+        from display_event import DisplayState
+        s = DisplayState()
+        assert s.get_display_power() is True
+        s.set_display_power(False)
+        assert s.get_display_power() is False
+        s.set_display_power(True)
+        assert s.get_display_power() is True
+
+    def test_network_connected_toggle(self):
+        """Test network connectivity flag."""
+        from display_event import DisplayState
+        s = DisplayState()
+        assert s.is_network_connected() is True
+        s.set_network_connected(False)
+        assert s.is_network_connected() is False
+
+    def test_heat_change_last_writer_wins(self):
+        """Test that successive heat change requests overwrite."""
+        from display_event import DisplayState
+        s = DisplayState()
+        s.request_heat_change('next')
+        s.request_heat_change('prev')
+        assert s.consume_heat_change_request() == 'prev'
+
+
 class TestLoadFileWithRetry:
     """Tests for load_file_with_retry function."""
 
@@ -1168,40 +1231,39 @@ class TestNetworkMonitorLoop:
     @patch('display_event.get_default_gateway', return_value='192.168.1.1')
     def test_sets_connected_when_reachable(self, mock_gw, mock_ping):
         """Test that network_connected is True when gateway is reachable."""
-        import display_event
+        from display_event import DisplayState, network_monitor_loop
 
-        display_event.network_connected = False  # Start disconnected
+        state = DisplayState()
+        state.set_network_connected(False)  # Start disconnected
         # Run one iteration by mocking time.sleep to raise after first call
         with patch('display_event.time.sleep', side_effect=StopIteration):
             try:
-                display_event.network_monitor_loop(interval=10)
+                network_monitor_loop(state, interval=10)
             except StopIteration:
                 pass
-        with display_event.network_status_lock:
-            assert display_event.network_connected is True
+        assert state.is_network_connected() is True
 
     @patch('display_event.check_network_connectivity', return_value=False)
     @patch('display_event.get_default_gateway', return_value='192.168.1.1')
     def test_sets_disconnected_when_unreachable(self, mock_gw, mock_ping):
         """Test that network_connected is False when gateway is unreachable."""
-        import display_event
+        from display_event import DisplayState, network_monitor_loop
 
-        display_event.network_connected = True  # Start connected
+        state = DisplayState()
+        state.set_network_connected(True)  # Start connected
         with patch('display_event.time.sleep', side_effect=StopIteration):
             try:
-                display_event.network_monitor_loop(interval=10)
+                network_monitor_loop(state, interval=10)
             except StopIteration:
                 pass
-        with display_event.network_status_lock:
-            assert display_event.network_connected is False
+        assert state.is_network_connected() is False
 
     @patch('display_event.get_default_gateway', return_value=None)
     def test_exits_when_no_gateway(self, mock_gw):
         """Test that monitor exits gracefully when no gateway found."""
-        import display_event
+        from display_event import DisplayState, network_monitor_loop
 
-        display_event.network_connected = True
+        state = DisplayState()
         # Should return immediately without looping
-        display_event.network_monitor_loop(interval=10)
-        with display_event.network_status_lock:
-            assert display_event.network_connected is True
+        network_monitor_loop(state, interval=10)
+        assert state.is_network_connected() is True

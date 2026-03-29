@@ -68,21 +68,96 @@ except ImportError:
     except ImportError:
         logging.warning("No keyboard library available (tried evdev, pynput). Keyboard navigation disabled.")
 
-# Global state for keyboard navigation
-heat_change_lock = threading.Lock()
-heat_change_request = None  # None, 'next', 'prev', or 'reset'
 
-# Global state for file reload monitoring
-file_reload_lock = threading.Lock()
-file_reload_requested = False
+class DisplayState:
+    """Thread-safe container for shared display state.
 
-# Global state for display power (on/off)
-display_power_lock = threading.Lock()
-display_power_on = True
+    Consolidates the global flags and locks used to coordinate between
+    the main loop, keyboard listeners, file watcher, web server,
+    and network monitor threads.
+    """
 
-# Global state for network connectivity
-network_status_lock = threading.Lock()
-network_connected = True
+    def __init__(self):
+        self._heat_change_lock = threading.Lock()
+        self._heat_change_request = None  # None, 'next', 'prev', or 'reset'
+
+        self._file_reload_lock = threading.Lock()
+        self._file_reload_requested = False
+
+        self._display_power_lock = threading.Lock()
+        self._display_power_on = True
+
+        self._network_status_lock = threading.Lock()
+        self._network_connected = True
+
+    # --- Heat change ---
+
+    def request_heat_change(self, direction):
+        """Request a heat change. direction is 'next', 'prev', or 'reset'."""
+        with self._heat_change_lock:
+            self._heat_change_request = direction
+
+    def get_heat_change_request(self):
+        """Return the current heat change request without clearing it."""
+        with self._heat_change_lock:
+            return self._heat_change_request
+
+    def consume_heat_change_request(self):
+        """Return and clear the pending heat change request."""
+        with self._heat_change_lock:
+            req = self._heat_change_request
+            self._heat_change_request = None
+            return req
+
+    def has_heat_change_request(self):
+        """Check if there is a pending heat change request."""
+        with self._heat_change_lock:
+            return self._heat_change_request is not None
+
+    # --- File reload ---
+
+    def request_file_reload(self):
+        """Signal that config files should be reloaded."""
+        with self._file_reload_lock:
+            self._file_reload_requested = True
+
+    def consume_file_reload_request(self):
+        """Return True and clear the flag if a reload was requested."""
+        with self._file_reload_lock:
+            if self._file_reload_requested:
+                self._file_reload_requested = False
+                return True
+            return False
+
+    def has_file_reload_request(self):
+        """Check if a file reload is pending."""
+        with self._file_reload_lock:
+            return self._file_reload_requested
+
+    # --- Display power ---
+
+    def get_display_power(self):
+        """Return True if the display is on."""
+        with self._display_power_lock:
+            return self._display_power_on
+
+    def set_display_power(self, state):
+        """Set display power on (True) or off (False)."""
+        with self._display_power_lock:
+            self._display_power_on = state
+        logging.info("Display power set to %s", 'on' if state else 'off')
+
+    # --- Network status ---
+
+    def is_network_connected(self):
+        """Return True if network is reachable."""
+        with self._network_status_lock:
+            return self._network_connected
+
+    def set_network_connected(self, connected):
+        """Update network connectivity status."""
+        with self._network_status_lock:
+            self._network_connected = connected
 
 
 # Note: Parsing and formatting functions moved to event_parser.py
@@ -150,16 +225,16 @@ def check_network_connectivity(gateway):
         return False
 
 
-def network_monitor_loop(interval=10):
+def network_monitor_loop(state, interval=10):
     """Background thread that monitors network connectivity.
 
-    Pings the default gateway periodically and updates the global
-    network_connected flag.
+    Pings the default gateway periodically and updates the
+    network_connected flag on the DisplayState object.
 
     Args:
+        state: DisplayState instance
         interval: Seconds between checks (default 10)
     """
-    global network_connected
     gateway = get_default_gateway()
     if gateway is None:
         logging.warning("Could not determine default gateway - network monitoring disabled")
@@ -170,8 +245,7 @@ def network_monitor_loop(interval=10):
     while True:
         reachable = check_network_connectivity(gateway)
 
-        with network_status_lock:
-            network_connected = reachable
+        state.set_network_connected(reachable)
 
         # Log state transitions
         if reachable and not was_connected:
@@ -195,11 +269,14 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
                          line_height: int, header_line_height: int,
                          interval: float, chain: int, parallel: int,
                          gpio_slowdown: int, once: bool, font_shift: int,
+                         state: 'DisplayState',
                          affiliation_colors: Optional[Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int], str]]] = None,
                          header_rows: int = 1):
     """Render the given event repeatedly (paging) onto the RGB matrix.
 
     `matrix_classes` is the tuple returned by `try_import_rgbmatrix()`.
+    `state` is a DisplayState instance for checking heat changes, file reloads,
+    display power, and network status.
     Returns True if should continue running, False if should reload with different heat.
     """
     RGBMatrix, RGBMatrixOptions, graphics = matrix_classes
@@ -373,9 +450,7 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
                     graphics.DrawText(canvas, font, name_x, y_txt, text_color, name_txt)
 
             # Draw network status indicator (red bottom row when disconnected)
-            net_ok = True
-            with network_status_lock:
-                net_ok = network_connected
+            net_ok = state.is_network_connected()
             if not net_ok:
                 red = graphics.Color(255, 0, 0)
                 fill_rectangle(canvas, graphics, 0, canvas_height - 1, canvas_width - 1, canvas_height - 1, red)
@@ -401,39 +476,30 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
             check_interval = 0.1  # Check every 100ms for better responsiveness
             while elapsed < interval:
                 # Check for heat change request
-                global heat_change_request, file_reload_requested
-                with heat_change_lock:
-                    if heat_change_request is not None:
-                        matrix.Clear()
-                        return False  # Signal to reload
+                if state.has_heat_change_request():
+                    matrix.Clear()
+                    return False  # Signal to reload
 
                 # Check for file reload request
-                with file_reload_lock:
-                    if file_reload_requested:
-                        matrix.Clear()
-                        return False  # Signal to reload
+                if state.has_file_reload_request():
+                    matrix.Clear()
+                    return False  # Signal to reload
 
                 # Check for display power off
-                power_is_on = True
-                with display_power_lock:
-                    power_is_on = display_power_on
-                if not power_is_on:
+                if not state.get_display_power():
                     matrix.Clear()
                     canvas = matrix.SwapOnVSync(canvas)
                     # Stay in sleep loop but don't advance pages
                     while True:
                         time.sleep(check_interval)
-                        with display_power_lock:
-                            if display_power_on:
-                                break
-                        with heat_change_lock:
-                            if heat_change_request is not None:
-                                matrix.Clear()
-                                return False
-                        with file_reload_lock:
-                            if file_reload_requested:
-                                matrix.Clear()
-                                return False
+                        if state.get_display_power():
+                            break
+                        if state.has_heat_change_request():
+                            matrix.Clear()
+                            return False
+                        if state.has_file_reload_request():
+                            matrix.Clear()
+                            return False
                     # Power back on — re-render current page
                     render_page(page_idx)
                     elapsed = 0.0
@@ -521,13 +587,13 @@ def find_keyboard_device():
         return None
 
 
-def evdev_keyboard_listener(device_path=None):
+def evdev_keyboard_listener(state, device_path=None):
     """Listen for keyboard events using evdev (runs in separate thread).
 
     Args:
+        state: DisplayState instance
         device_path: Optional path to specific input device (e.g., '/dev/input/event2')
     """
-    global heat_change_request
 
     if device_path:
         try:
@@ -553,16 +619,13 @@ def evdev_keyboard_listener(device_path=None):
                     logging.info("Key event detected: %s", key_event.keycode)
 
                     if key_event.keycode == 'KEY_PAGEDOWN':
-                        with heat_change_lock:
-                            heat_change_request = 'next'
+                        state.request_heat_change('next')
                         logging.info(">>> Page Down pressed - next heat requested")
                     elif key_event.keycode == 'KEY_PAGEUP':
-                        with heat_change_lock:
-                            heat_change_request = 'prev'
+                        state.request_heat_change('prev')
                         logging.info(">>> Page Up pressed - previous heat requested")
                     elif key_event.keycode == 'KEY_DOT':
-                        with heat_change_lock:
-                            heat_change_request = 'reset'
+                        state.request_heat_change('reset')
                         logging.info(">>> Period pressed - reset to original heat requested")
     except Exception as e:
         logging.error("Keyboard listener error: %s", e)
@@ -570,36 +633,35 @@ def evdev_keyboard_listener(device_path=None):
         logging.error(traceback.format_exc())
 
 
-def on_key_press_pynput(key):
-    """Handle keyboard events for heat navigation using pynput."""
-    global heat_change_request
+def make_pynput_handler(state):
+    """Create a pynput key-press handler bound to a DisplayState instance."""
 
-    # Debug: log all key presses
-    logging.debug("Key pressed: %s", key)
+    def on_key_press(key):
+        # Debug: log all key presses
+        logging.debug("Key pressed: %s", key)
 
-    # Check for special keys first
-    if hasattr(key, 'name'):
-        # Special key (Page Up, Page Down, etc.)
-        if key == keyboard.Key.page_down:
-            with heat_change_lock:
-                heat_change_request = 'next'
-            logging.info("Page Down pressed - next heat")
-            return
-        elif key == keyboard.Key.page_up:
-            with heat_change_lock:
-                heat_change_request = 'prev'
-            logging.info("Page Up pressed - previous heat")
-            return
+        # Check for special keys first
+        if hasattr(key, 'name'):
+            # Special key (Page Up, Page Down, etc.)
+            if key == keyboard.Key.page_down:
+                state.request_heat_change('next')
+                logging.info("Page Down pressed - next heat")
+                return
+            elif key == keyboard.Key.page_up:
+                state.request_heat_change('prev')
+                logging.info("Page Up pressed - previous heat")
+                return
 
-    # Check for character keys (like period)
-    try:
-        if hasattr(key, 'char') and key.char == '.':
-            with heat_change_lock:
-                heat_change_request = 'reset'
-            logging.info("Period pressed - resetting to original heat")
-            return
-    except AttributeError:
-        pass
+        # Check for character keys (like period)
+        try:
+            if hasattr(key, 'char') and key.char == '.':
+                state.request_heat_change('reset')
+                logging.info("Period pressed - resetting to original heat")
+                return
+        except AttributeError:
+            pass
+
+    return on_key_press
 
 
 def load_file_with_retry(load_func, file_description: str, max_retries: int = 3):
@@ -909,57 +971,40 @@ def handle_heat_change(request, schedule, current_schedule_index, starting_sched
     return current_event, current_round, current_heat, current_schedule_index
 
 
-def setup_peripherals(settings, config_dir, args_keyboard_device):
+def setup_peripherals(settings, config_dir, args_keyboard_device, state):
     """Start background services: web server, file watcher, network monitor, keyboard listener.
 
     Args:
         settings: Full settings dict
         config_dir: Path to config directory
         args_keyboard_device: Keyboard device path from CLI args (or None)
+        state: DisplayState instance
 
     Returns:
-        Tuple of (web_server, file_watcher, keyboard_listener, request_file_reload, get_display_power, set_display_power)
+        Tuple of (web_server, file_watcher, keyboard_listener)
     """
-    # File reload callback for file watcher
-    def request_file_reload():
-        global file_reload_requested
-        with file_reload_lock:
-            file_reload_requested = True
-
-    # Display power callbacks for web server
-    def get_display_power():
-        global display_power_on
-        with display_power_lock:
-            return display_power_on
-
-    def set_display_power(state):
-        global display_power_on
-        with display_power_lock:
-            display_power_on = state
-        logging.info(f"Display power set to {'on' if state else 'off'}")
-
     # Start web server if enabled
     web_server = None
     if settings.get('web', {}).get('web_enabled', False):
         web_host = settings.get('web', {}).get('web_host', '0.0.0.0')
         web_port = settings.get('web', {}).get('web_port', 5000)
         web_server = start_web_server(config_dir, web_host, web_port,
-                                      get_display_power=get_display_power,
-                                      set_display_power=set_display_power)
+                                      get_display_power=state.get_display_power,
+                                      set_display_power=state.set_display_power)
         if web_server:
             logging.info(f"Web interface available at http://{web_host}:{web_port}")
         else:
             logging.warning("Web server could not be started")
 
     # Start file watcher
-    file_watcher = start_file_watcher(config_dir, request_file_reload)
+    file_watcher = start_file_watcher(config_dir, state.request_file_reload)
     if file_watcher:
         logging.info("File monitoring enabled for auto-reload")
     else:
         logging.warning("File monitoring could not be started - manual restart required for file changes")
 
     # Start network monitor thread
-    network_thread = threading.Thread(target=network_monitor_loop, daemon=True)
+    network_thread = threading.Thread(target=network_monitor_loop, args=(state,), daemon=True)
     network_thread.start()
 
     # Start keyboard listener if available
@@ -969,13 +1014,13 @@ def setup_peripherals(settings, config_dir, args_keyboard_device):
             # Start evdev listener in a separate thread
             keyboard_thread = threading.Thread(
                 target=evdev_keyboard_listener,
-                args=(args_keyboard_device,),
+                args=(state, args_keyboard_device),
                 daemon=True
             )
             keyboard_thread.start()
             logging.info("Keyboard navigation enabled (evdev): Page Down (next heat), Page Up (prev heat), Period (reset)")
         elif keyboard_backend == 'pynput':
-            keyboard_listener = keyboard.Listener(on_press=on_key_press_pynput)
+            keyboard_listener = keyboard.Listener(on_press=make_pynput_handler(state))
             keyboard_listener.start()
             logging.info("Keyboard navigation enabled (pynput): Page Down (next heat), Page Up (prev heat), Period (reset)")
 
@@ -1058,9 +1103,12 @@ def main():
     # Load affiliation colors
     affiliation_colors = load_affiliation_colors(args.colors_csv)
 
+    # Create shared display state
+    state = DisplayState()
+
     # Start peripheral services
     web_server, file_watcher, keyboard_listener = setup_peripherals(
-        settings, config_dir, args.keyboard_device)
+        settings, config_dir, args.keyboard_device, state)
 
     # Load schedule file if available
     schedule_path = os.path.join(config_dir, "lynx.sch")
@@ -1145,18 +1193,14 @@ def main():
                                  line_height=args.line_height, header_line_height=args.header_line_height,
                                  interval=args.interval, chain=args.chain, parallel=args.parallel,
                                  gpio_slowdown=args.gpio_slowdown, once=args.once, font_shift=disp['font_shift'],
+                                 state=state,
                                  affiliation_colors=affiliation_colors, header_rows=args.header_rows)
 
             if should_continue or args.once:
                 break
 
             # Check what triggered the reload
-            global heat_change_request, file_reload_requested
-            is_file_reload = False
-            with file_reload_lock:
-                if file_reload_requested:
-                    is_file_reload = True
-                    file_reload_requested = False
+            is_file_reload = state.consume_file_reload_request()
 
             if is_file_reload:
                 result = handle_file_reload(
@@ -1181,12 +1225,11 @@ def main():
                 continue
 
             # Handle heat change request
-            with heat_change_lock:
-                args.event, args.round, current_heat, current_schedule_index = handle_heat_change(
-                    heat_change_request, schedule, current_schedule_index, starting_schedule_index,
-                    args.event, args.round, current_heat,
-                    original_event, original_round, original_heat, events)
-                heat_change_request = None  # Clear the request
+            request = state.consume_heat_change_request()
+            args.event, args.round, current_heat, current_schedule_index = handle_heat_change(
+                request, schedule, current_schedule_index, starting_schedule_index,
+                args.event, args.round, current_heat,
+                original_event, original_round, original_heat, events)
     except Exception as e:
         logging.exception("Failed to render event: %s", e)
         sys.exit(5)
