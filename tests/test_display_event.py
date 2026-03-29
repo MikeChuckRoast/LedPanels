@@ -37,38 +37,130 @@ class TestDisplayEventInitialization:
 
 
 class TestEventNavigation:
-    """Tests for event navigation functionality."""
+    """Tests for handle_heat_change function."""
 
-    def test_page_up_advances_heat(self):
-        """Test that Page Up key advances to next heat."""
-        # Mock keyboard input
-        # Mock current event state
-        # Trigger page up
-        # Verify heat incremented
-        pass
+    def _make_events(self, keys):
+        """Helper to build a minimal events dict from (event, round, heat) tuples."""
+        return {k: {"event": k[0], "round": k[1], "heat": k[2], "name": "Test", "athletes": []} for k in keys}
 
-    def test_page_down_goes_to_previous_heat(self):
-        """Test that Page Down key goes to previous heat."""
-        # Mock keyboard input
-        # Mock current event state
-        # Trigger page down
-        # Verify heat decremented
-        pass
+    # --- Heat‑increment mode (no schedule) ---
 
-    def test_heat_wraps_to_next_round(self):
-        """Test that advancing past last heat wraps to next round."""
-        # Set current to last heat of round
-        # Advance heat
-        # Verify round incremented and heat reset to 1
-        pass
+    def test_next_advances_heat(self):
+        """Test 'next' moves to the next heat when it exists."""
+        from display_event import handle_heat_change
 
-    def test_navigation_respects_schedule_when_enabled(self):
-        """Test that navigation follows schedule when schedule mode enabled."""
-        # Load schedule
-        # Enable schedule navigation
-        # Advance
-        # Verify moves to next scheduled event
-        pass
+        events = self._make_events([(1, 1, 1), (1, 1, 2)])
+        ev, rnd, ht, idx = handle_heat_change(
+            'next', schedule=[], current_schedule_index=-1, starting_schedule_index=-1,
+            current_event=1, current_round=1, current_heat=1,
+            original_event=1, original_round=1, original_heat=1, events=events)
+        assert (ev, rnd, ht) == (1, 1, 2)
+
+    def test_next_stays_when_no_next_heat(self):
+        """Test 'next' stays on current heat when next doesn't exist."""
+        from display_event import handle_heat_change
+
+        events = self._make_events([(1, 1, 1)])
+        ev, rnd, ht, idx = handle_heat_change(
+            'next', schedule=[], current_schedule_index=-1, starting_schedule_index=-1,
+            current_event=1, current_round=1, current_heat=1,
+            original_event=1, original_round=1, original_heat=1, events=events)
+        assert (ev, rnd, ht) == (1, 1, 1)
+
+    def test_prev_goes_back_but_not_before_original(self):
+        """Test 'prev' goes back one heat but stops at original_heat floor."""
+        from display_event import handle_heat_change
+
+        events = self._make_events([(1, 1, 1), (1, 1, 2), (1, 1, 3)])
+        # Currently on heat 3, original is heat 2 — should go to 2 but not below
+        ev, rnd, ht, _ = handle_heat_change(
+            'prev', schedule=[], current_schedule_index=-1, starting_schedule_index=-1,
+            current_event=1, current_round=1, current_heat=3,
+            original_event=1, original_round=1, original_heat=2, events=events)
+        assert ht == 2
+
+        # Now at heat 2 which equals original_heat — should stay
+        ev, rnd, ht, _ = handle_heat_change(
+            'prev', schedule=[], current_schedule_index=-1, starting_schedule_index=-1,
+            current_event=1, current_round=1, current_heat=2,
+            original_event=1, original_round=1, original_heat=2, events=events)
+        assert ht == 2
+
+    def test_reset_returns_to_original(self):
+        """Test 'reset' returns to original event/round/heat."""
+        from display_event import handle_heat_change
+
+        events = self._make_events([(1, 1, 1), (1, 1, 2)])
+        ev, rnd, ht, _ = handle_heat_change(
+            'reset', schedule=[], current_schedule_index=-1, starting_schedule_index=-1,
+            current_event=1, current_round=1, current_heat=2,
+            original_event=1, original_round=1, original_heat=1, events=events)
+        assert (ev, rnd, ht) == (1, 1, 1)
+
+    def test_reset_noop_when_already_at_original(self):
+        """Test 'reset' is a no-op when already at original."""
+        from display_event import handle_heat_change
+
+        events = self._make_events([(1, 1, 1)])
+        ev, rnd, ht, _ = handle_heat_change(
+            'reset', schedule=[], current_schedule_index=-1, starting_schedule_index=-1,
+            current_event=1, current_round=1, current_heat=1,
+            original_event=1, original_round=1, original_heat=1, events=events)
+        assert (ev, rnd, ht) == (1, 1, 1)
+
+    # --- Schedule mode ---
+
+    def test_schedule_next_advances_index(self):
+        """Test 'next' advances schedule index."""
+        from display_event import handle_heat_change
+
+        schedule = [(1, 1, 1), (2, 1, 1), (3, 1, 1)]
+        events = self._make_events(schedule)
+        ev, rnd, ht, idx = handle_heat_change(
+            'next', schedule=schedule, current_schedule_index=0, starting_schedule_index=0,
+            current_event=1, current_round=1, current_heat=1,
+            original_event=1, original_round=1, original_heat=1, events=events)
+        assert (ev, rnd, ht) == (2, 1, 1)
+        assert idx == 1
+
+    def test_schedule_next_at_end_stays(self):
+        """Test 'next' at end of schedule stays put."""
+        from display_event import handle_heat_change
+
+        schedule = [(1, 1, 1), (2, 1, 1)]
+        events = self._make_events(schedule)
+        ev, rnd, ht, idx = handle_heat_change(
+            'next', schedule=schedule, current_schedule_index=1, starting_schedule_index=0,
+            current_event=2, current_round=1, current_heat=1,
+            original_event=1, original_round=1, original_heat=1, events=events)
+        assert (ev, rnd, ht) == (2, 1, 1)
+        assert idx == 1
+
+    def test_schedule_prev_stops_at_starting_index(self):
+        """Test 'prev' in schedule mode won't go before starting_schedule_index."""
+        from display_event import handle_heat_change
+
+        schedule = [(1, 1, 1), (2, 1, 1), (3, 1, 1)]
+        events = self._make_events(schedule)
+        # Starting at index 1, currently at index 1 — prev should not go to 0
+        ev, rnd, ht, idx = handle_heat_change(
+            'prev', schedule=schedule, current_schedule_index=1, starting_schedule_index=1,
+            current_event=2, current_round=1, current_heat=1,
+            original_event=2, original_round=1, original_heat=1, events=events)
+        assert idx == 1
+
+    def test_schedule_reset_returns_to_starting(self):
+        """Test 'reset' in schedule mode returns to starting_schedule_index."""
+        from display_event import handle_heat_change
+
+        schedule = [(1, 1, 1), (2, 1, 1), (3, 1, 1)]
+        events = self._make_events(schedule)
+        ev, rnd, ht, idx = handle_heat_change(
+            'reset', schedule=schedule, current_schedule_index=2, starting_schedule_index=0,
+            current_event=3, current_round=1, current_heat=1,
+            original_event=1, original_round=1, original_heat=1, events=events)
+        assert (ev, rnd, ht) == (1, 1, 1)
+        assert idx == 0
 
 
 class TestEventRendering:
@@ -428,6 +520,189 @@ class TestLoadFileWithRetry:
 
         result = load_file_with_retry(fail_load, "test file", max_retries=1)
         assert result is None
+
+
+class TestHandleFileReload:
+    """Tests for handle_file_reload function."""
+
+    def _make_config_dir(self, tmp_path, events_content, current_event, settings_toml=None):
+        """Helper to create a populated config directory for reload tests."""
+        import json
+        config_dir = tmp_path / "config"
+        config_dir.mkdir(exist_ok=True)
+
+        (config_dir / "lynx.evt").write_text(events_content)
+        (config_dir / "current_event.json").write_text(json.dumps(current_event))
+        (config_dir / "colors.csv").write_text("Team,Primary,Secondary\n")
+
+        if settings_toml is None:
+            settings_toml = """
+[hardware]
+width = 64
+height = 32
+chain = 2
+parallel = 4
+gpio_slowdown = 3
+
+[display]
+line_height = 24
+header_line_height = 16
+header_rows = 2
+interval = 2.0
+font_shift = 7
+
+[fonts]
+font_path = "fonts"
+font_name = "helvB14.bdf"
+
+[files]
+lynx_file = "lynx.evt"
+colors_file = "colors.csv"
+
+[network]
+fpp_enabled = false
+fpp_host = "127.0.0.1"
+fpp_port = 4048
+colorlight_enabled = false
+colorlight_interface = "eth0"
+
+[keyboard]
+device_path = ""
+
+[behavior]
+once = false
+
+[monitoring]
+file_watch_enabled = true
+poll_interval = 1.0
+
+[web]
+web_enabled = false
+web_host = "0.0.0.0"
+web_port = 5000
+"""
+        (config_dir / "settings.toml").write_text(settings_toml)
+        return str(config_dir)
+
+    def test_reloads_events_and_colors(self, tmp_path, lynx_evt_fixture):
+        """Test that handle_file_reload reloads events and colors."""
+        import json
+        import shutil
+
+        from display_event import handle_file_reload
+
+        config_dir = self._make_config_dir(tmp_path,
+            events_content=lynx_evt_fixture.read_text(),
+            current_event={"event": 1, "round": 1, "heat": 1})
+
+        evt_path = str(Path(config_dir) / "lynx.evt")
+        colors_path = str(Path(config_dir) / "colors.csv")
+
+        result = handle_file_reload(
+            config_dir=config_dir,
+            events={(1, 1, 1): {"name": "Old", "athletes": []}},
+            affiliation_colors={},
+            disp={"font_shift": 7, "line_height": 24, "header_line_height": 16,
+                  "header_rows": 2, "interval": 2.0},
+            schedule=[],
+            args_file=evt_path,
+            args_font="fonts/helvB14.bdf",
+            args_colors_csv=colors_path,
+            displayed_event=1, displayed_round=1, displayed_heat=1,
+            current_schedule_index=-1, starting_schedule_index=-1,
+            original_event=1, original_round=1, original_heat=1)
+
+        # Events should be reloaded (not the old single-entry dict)
+        assert len(result['events']) > 0
+        assert isinstance(result['affiliation_colors'], dict)
+
+    def test_jumps_forward_when_behind_reference(self, tmp_path, lynx_evt_fixture):
+        """Test that display jumps forward when behind incoming reference."""
+        from display_event import handle_file_reload
+
+        config_dir = self._make_config_dir(tmp_path,
+            events_content=lynx_evt_fixture.read_text(),
+            current_event={"event": 7, "round": 1, "heat": 2})
+
+        evt_path = str(Path(config_dir) / "lynx.evt")
+        colors_path = str(Path(config_dir) / "colors.csv")
+
+        result = handle_file_reload(
+            config_dir=config_dir,
+            events={(1, 1, 1): {"name": "Old", "athletes": []}},
+            affiliation_colors={},
+            disp={"font_shift": 7, "line_height": 24, "header_line_height": 16,
+                  "header_rows": 2, "interval": 2.0},
+            schedule=[],
+            args_file=evt_path,
+            args_font="fonts/helvB14.bdf",
+            args_colors_csv=colors_path,
+            displayed_event=1, displayed_round=1, displayed_heat=1,
+            current_schedule_index=-1, starting_schedule_index=-1,
+            original_event=1, original_round=1, original_heat=1)
+
+        # Display was at (1,1,1), incoming reference is (7,1,2) — should jump forward
+        assert result['event'] == 7
+        assert result['heat'] == 2
+
+    def test_stays_when_ahead_of_reference(self, tmp_path, lynx_evt_fixture):
+        """Test that display stays put when ahead of incoming reference."""
+        from display_event import handle_file_reload
+
+        config_dir = self._make_config_dir(tmp_path,
+            events_content=lynx_evt_fixture.read_text(),
+            current_event={"event": 1, "round": 1, "heat": 1})
+
+        evt_path = str(Path(config_dir) / "lynx.evt")
+        colors_path = str(Path(config_dir) / "colors.csv")
+
+        result = handle_file_reload(
+            config_dir=config_dir,
+            events={(7, 1, 1): {"name": "Current", "athletes": []}},
+            affiliation_colors={},
+            disp={"font_shift": 7, "line_height": 24, "header_line_height": 16,
+                  "header_rows": 2, "interval": 2.0},
+            schedule=[],
+            args_file=evt_path,
+            args_font="fonts/helvB14.bdf",
+            args_colors_csv=colors_path,
+            displayed_event=7, displayed_round=1, displayed_heat=1,
+            current_schedule_index=-1, starting_schedule_index=-1,
+            original_event=1, original_round=1, original_heat=1)
+
+        # Display was at (7,1,1), incoming reference is (1,1,1) — should stay
+        assert result['event'] == 7
+        assert result['heat'] == 1
+
+    def test_updates_reference_on_current_event_change(self, tmp_path, lynx_evt_fixture):
+        """Test that original_event/round/heat update when current_event.json changes."""
+        from display_event import handle_file_reload
+
+        config_dir = self._make_config_dir(tmp_path,
+            events_content=lynx_evt_fixture.read_text(),
+            current_event={"event": 5, "round": 1, "heat": 1})
+
+        evt_path = str(Path(config_dir) / "lynx.evt")
+        colors_path = str(Path(config_dir) / "colors.csv")
+
+        result = handle_file_reload(
+            config_dir=config_dir,
+            events={(1, 1, 1): {"name": "Old", "athletes": []}},
+            affiliation_colors={},
+            disp={"font_shift": 7, "line_height": 24, "header_line_height": 16,
+                  "header_rows": 2, "interval": 2.0},
+            schedule=[],
+            args_file=evt_path,
+            args_font="fonts/helvB14.bdf",
+            args_colors_csv=colors_path,
+            displayed_event=1, displayed_round=1, displayed_heat=1,
+            current_schedule_index=-1, starting_schedule_index=-1,
+            original_event=1, original_round=1, original_heat=1)
+
+        # Reference should be updated to incoming values
+        assert result['original_event'] == 5
+        assert result['original_round'] == 1
+        assert result['original_heat'] == 1
 
 
 class TestErrorHandling:

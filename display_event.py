@@ -630,6 +630,358 @@ def load_file_with_retry(load_func, file_description: str, max_retries: int = 3)
     return None
 
 
+def handle_file_reload(config_dir, events, affiliation_colors, disp, schedule,
+                       args_file, args_font, args_colors_csv,
+                       displayed_event, displayed_round, displayed_heat,
+                       current_schedule_index, starting_schedule_index,
+                       original_event, original_round, original_heat):
+    """Handle file reload: re-read data files and conditionally jump forward.
+
+    Args:
+        config_dir: Path to config directory
+        events: Current events dict
+        affiliation_colors: Current color mappings
+        disp: Current display settings dict
+        schedule: Current schedule list
+        args_file: Path to lynx.evt file
+        args_font: Current font path
+        args_colors_csv: Path to colors.csv file
+        displayed_event: Event number currently displayed
+        displayed_round: Round number currently displayed
+        displayed_heat: Heat number currently displayed
+        current_schedule_index: Index of currently displayed event in schedule
+        starting_schedule_index: Index of reference event in schedule (keyboard floor)
+        original_event: Reference event number (keyboard floor)
+        original_round: Reference round number (keyboard floor)
+        original_heat: Reference heat number (keyboard floor)
+
+    Returns:
+        Dict with updated state keys: events, affiliation_colors, disp, font,
+        event, round, heat, schedule, starting_schedule_index,
+        current_schedule_index, original_event, original_round, original_heat
+    """
+    logging.info("Reloading event data from files...")
+
+    # Phase 1: Capture currently displayed state before reload
+    displayed_event_tuple = (displayed_event, displayed_round, displayed_heat)
+
+    # Track whether current_event.json changed
+    current_event_changed = False
+    incoming_event = displayed_event
+    incoming_round = displayed_round
+    incoming_heat = displayed_heat
+
+    # Reload lynx.evt with retry logic
+    new_events = load_file_with_retry(
+        lambda: parse_lynx_file(args_file),
+        "lynx.evt"
+    )
+    if new_events is not None:
+        events = new_events
+    else:
+        logging.warning("Could not reload lynx.evt - continuing with current data")
+
+    # Reload current_event.json with retry logic
+    new_current_event = load_file_with_retry(
+        lambda: load_current_event(config_dir),
+        "current_event.json"
+    )
+    if new_current_event is not None:
+        # Store incoming values - don't update display yet (conditional jump later)
+        incoming_event = new_current_event['event']
+        incoming_round = new_current_event['round']
+        incoming_heat = new_current_event['heat']
+        current_event_changed = True
+        # Always update the reference floor (keyboard can't go before this)
+        original_event = incoming_event
+        original_round = incoming_round
+        original_heat = incoming_heat
+        logging.info(f"Reference updated to Event={incoming_event}, Round={incoming_round}, Heat={incoming_heat}")
+    else:
+        logging.warning("Could not reload current_event.json - continuing with current event selection")
+
+    # Reload colors.csv with retry logic
+    new_colors = load_file_with_retry(
+        lambda: load_affiliation_colors(args_colors_csv),
+        "colors.csv"
+    )
+    if new_colors is not None:
+        affiliation_colors = new_colors
+    else:
+        logging.warning("Could not reload colors.csv - continuing with current colors")
+
+    # Reload settings.toml so display settings (font_shift, line_height, etc.) update live
+    new_settings = load_file_with_retry(
+        lambda: load_settings(config_dir),
+        "settings.toml"
+    )
+    font = args_font
+    if new_settings is not None:
+        disp = new_settings['display']
+        new_fonts = new_settings['fonts']
+        new_font_path = os.path.join(new_fonts['font_path'], new_fonts['font_name'])
+        if new_font_path != args_font:
+            font = new_font_path
+            logging.info(f"Font updated: {font}")
+        logging.info("Display settings reloaded from settings.toml")
+    else:
+        logging.warning("Could not reload settings.toml - continuing with current display settings")
+
+    # Reload schedule (lynx.sch) if it exists
+    schedule_path = os.path.join(config_dir, "lynx.sch")
+    if os.path.exists(schedule_path):
+        new_schedule = load_file_with_retry(
+            lambda: parse_schedule(schedule_path),
+            "lynx.sch"
+        )
+        if new_schedule is not None:
+            # Validate against reloaded events
+            validated_schedule = validate_schedule_entries(new_schedule, events)
+            if validated_schedule:
+                schedule = validated_schedule
+
+                # Calculate starting_schedule_index (reference floor) from incoming event
+                starting_schedule_index = find_schedule_index(schedule, incoming_event, incoming_round, incoming_heat)
+                if starting_schedule_index == -1:
+                    starting_schedule_index = find_nearest_schedule_index(
+                        schedule, incoming_event, incoming_round, incoming_heat
+                    )
+                    if starting_schedule_index == -1:
+                        logging.warning("Reference event is past all scheduled events - disabling schedule navigation")
+                        schedule = []
+                    else:
+                        # Update incoming to the nearest valid schedule entry
+                        incoming_event, incoming_round, incoming_heat = schedule[starting_schedule_index]
+                        original_event = incoming_event
+                        original_round = incoming_round
+                        original_heat = incoming_heat
+                        position_text = get_schedule_position_text(schedule, incoming_event, incoming_round, incoming_heat)
+                        logging.info(f"Reference event not in schedule - nearest: {position_text}")
+
+                # Recalculate current_schedule_index for the displayed event in the new schedule
+                if schedule:
+                    displayed_schedule_index = find_schedule_index(
+                        schedule, displayed_event_tuple[0], displayed_event_tuple[1], displayed_event_tuple[2]
+                    )
+                    if displayed_schedule_index == -1:
+                        displayed_schedule_index = find_nearest_schedule_index(
+                            schedule, displayed_event_tuple[0], displayed_event_tuple[1], displayed_event_tuple[2]
+                        )
+                        if displayed_schedule_index is None:
+                            displayed_schedule_index = len(schedule) - 1
+                    current_schedule_index = displayed_schedule_index
+            else:
+                logging.warning("No valid schedule entries after reload - disabling schedule navigation")
+                schedule = []
+        else:
+            logging.warning("Could not reload lynx.sch - continuing with current schedule")
+    else:
+        # Schedule file was deleted - disable schedule navigation
+        if schedule:
+            logging.info("Schedule file removed - switching to heat increment mode")
+            schedule = []
+
+    # Phase 4: Conditional jump - only jump display forward
+    result_event = displayed_event
+    result_round = displayed_round
+    result_heat = displayed_heat
+
+    if current_event_changed:
+        if schedule:
+            # Schedule mode: compare schedule positions
+            if current_schedule_index < starting_schedule_index:
+                # Display is behind reference - jump forward
+                current_schedule_index = starting_schedule_index
+                result_event, result_round, result_heat = schedule[current_schedule_index]
+                position_text = get_schedule_position_text(schedule, result_event, result_round, result_heat)
+                logging.info(f"Display behind reference - jumping forward to: {position_text}")
+            else:
+                logging.info(f"Display at or ahead of reference (pos {current_schedule_index + 1} >= ref {starting_schedule_index + 1}) - staying put")
+        else:
+            # No schedule: lexicographic tuple comparison
+            incoming_tuple = (incoming_event, incoming_round, incoming_heat)
+            if displayed_event_tuple < incoming_tuple:
+                # Display is behind reference - jump forward
+                result_event = incoming_event
+                result_round = incoming_round
+                result_heat = incoming_heat
+                logging.info(f"Display behind reference - jumping forward to Event={result_event}, Round={result_round}, Heat={result_heat}")
+            else:
+                logging.info(f"Display at or ahead of reference {incoming_tuple} - staying put at {displayed_event_tuple}")
+
+    logging.info("Reload complete - resuming display")
+
+    return {
+        'events': events,
+        'affiliation_colors': affiliation_colors,
+        'disp': disp,
+        'font': font,
+        'event': result_event,
+        'round': result_round,
+        'heat': result_heat,
+        'schedule': schedule,
+        'starting_schedule_index': starting_schedule_index,
+        'current_schedule_index': current_schedule_index,
+        'original_event': original_event,
+        'original_round': original_round,
+        'original_heat': original_heat,
+    }
+
+
+def handle_heat_change(request, schedule, current_schedule_index, starting_schedule_index,
+                       current_event, current_round, current_heat,
+                       original_event, original_round, original_heat, events):
+    """Handle a keyboard heat change request.
+
+    Args:
+        request: One of 'next', 'prev', or 'reset'
+        schedule: Current schedule list (empty if no schedule)
+        current_schedule_index: Index in schedule of currently displayed event
+        starting_schedule_index: Index in schedule of reference event (keyboard floor)
+        current_event: Currently displayed event number
+        current_round: Currently displayed round number
+        current_heat: Currently displayed heat number
+        original_event: Reference event number (keyboard floor)
+        original_round: Reference round number (keyboard floor)
+        original_heat: Reference heat number (keyboard floor)
+        events: Events dict for checking existence of next/prev heats
+
+    Returns:
+        Tuple of (event, round, heat, schedule_index) with updated values
+    """
+    if schedule:
+        # Schedule-based navigation
+        if request == 'next':
+            if current_schedule_index < len(schedule) - 1:
+                current_schedule_index += 1
+                current_event, current_round, current_heat = schedule[current_schedule_index]
+                position_text = get_schedule_position_text(schedule, current_event, current_round, current_heat)
+                logging.info("Moving to next event: %s", position_text)
+            else:
+                logging.info("Already at last event in schedule (position %d of %d)",
+                           current_schedule_index + 1, len(schedule))
+        elif request == 'prev':
+            if current_schedule_index > starting_schedule_index:
+                current_schedule_index -= 1
+                current_event, current_round, current_heat = schedule[current_schedule_index]
+                position_text = get_schedule_position_text(schedule, current_event, current_round, current_heat)
+                logging.info("Moving to previous event: %s", position_text)
+            else:
+                logging.info("Cannot go before starting event (position %d of %d)",
+                           starting_schedule_index + 1, len(schedule))
+        elif request == 'reset':
+            if current_schedule_index != starting_schedule_index:
+                current_schedule_index = starting_schedule_index
+                current_event, current_round, current_heat = schedule[current_schedule_index]
+                position_text = get_schedule_position_text(schedule, current_event, current_round, current_heat)
+                logging.info("Resetting to starting event: %s", position_text)
+            else:
+                position_text = get_schedule_position_text(schedule, current_event, current_round, current_heat)
+                logging.info("Already at starting event: %s", position_text)
+    else:
+        # Heat increment mode (fallback when no schedule)
+        if request == 'next':
+            # Try next heat
+            next_heat = current_heat + 1
+            if (current_event, current_round, next_heat) in events:
+                current_heat = next_heat
+                logging.info("Switching to heat %d", current_heat)
+            else:
+                logging.info("No heat %d found, staying on heat %d", next_heat, current_heat)
+        elif request == 'prev':
+            # Try previous heat (minimum original_heat)
+            prev_heat = max(original_heat, current_heat - 1)
+            if prev_heat != current_heat and (current_event, current_round, prev_heat) in events:
+                current_heat = prev_heat
+                logging.info("Switching to heat %d", current_heat)
+            else:
+                logging.info("Cannot go to heat %d, staying on heat %d", prev_heat, current_heat)
+        elif request == 'reset':
+            # Reset to reference event (latest current_event.json)
+            if current_event != original_event or current_round != original_round or current_heat != original_heat:
+                current_event = original_event
+                current_round = original_round
+                current_heat = original_heat
+                logging.info("Resetting to reference Event=%d, Round=%d, Heat=%d", current_event, current_round, current_heat)
+            else:
+                logging.info("Already at reference Event=%d, Round=%d, Heat=%d", current_event, current_round, current_heat)
+
+    return current_event, current_round, current_heat, current_schedule_index
+
+
+def setup_peripherals(settings, config_dir, args_keyboard_device):
+    """Start background services: web server, file watcher, network monitor, keyboard listener.
+
+    Args:
+        settings: Full settings dict
+        config_dir: Path to config directory
+        args_keyboard_device: Keyboard device path from CLI args (or None)
+
+    Returns:
+        Tuple of (web_server, file_watcher, keyboard_listener, request_file_reload, get_display_power, set_display_power)
+    """
+    # File reload callback for file watcher
+    def request_file_reload():
+        global file_reload_requested
+        with file_reload_lock:
+            file_reload_requested = True
+
+    # Display power callbacks for web server
+    def get_display_power():
+        global display_power_on
+        with display_power_lock:
+            return display_power_on
+
+    def set_display_power(state):
+        global display_power_on
+        with display_power_lock:
+            display_power_on = state
+        logging.info(f"Display power set to {'on' if state else 'off'}")
+
+    # Start web server if enabled
+    web_server = None
+    if settings.get('web', {}).get('web_enabled', False):
+        web_host = settings.get('web', {}).get('web_host', '0.0.0.0')
+        web_port = settings.get('web', {}).get('web_port', 5000)
+        web_server = start_web_server(config_dir, web_host, web_port,
+                                      get_display_power=get_display_power,
+                                      set_display_power=set_display_power)
+        if web_server:
+            logging.info(f"Web interface available at http://{web_host}:{web_port}")
+        else:
+            logging.warning("Web server could not be started")
+
+    # Start file watcher
+    file_watcher = start_file_watcher(config_dir, request_file_reload)
+    if file_watcher:
+        logging.info("File monitoring enabled for auto-reload")
+    else:
+        logging.warning("File monitoring could not be started - manual restart required for file changes")
+
+    # Start network monitor thread
+    network_thread = threading.Thread(target=network_monitor_loop, daemon=True)
+    network_thread.start()
+
+    # Start keyboard listener if available
+    keyboard_listener = None
+    if KEYBOARD_AVAILABLE:
+        if keyboard_backend == 'evdev':
+            # Start evdev listener in a separate thread
+            keyboard_thread = threading.Thread(
+                target=evdev_keyboard_listener,
+                args=(args_keyboard_device,),
+                daemon=True
+            )
+            keyboard_thread.start()
+            logging.info("Keyboard navigation enabled (evdev): Page Down (next heat), Page Up (prev heat), Period (reset)")
+        elif keyboard_backend == 'pynput':
+            keyboard_listener = keyboard.Listener(on_press=on_key_press_pynput)
+            keyboard_listener.start()
+            logging.info("Keyboard navigation enabled (pynput): Page Down (next heat), Page Up (prev heat), Period (reset)")
+
+    return web_server, file_watcher, keyboard_listener
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
@@ -706,67 +1058,9 @@ def main():
     # Load affiliation colors
     affiliation_colors = load_affiliation_colors(args.colors_csv)
 
-    # File reload callback for file watcher
-    def request_file_reload():
-        global file_reload_requested
-        with file_reload_lock:
-            file_reload_requested = True
-
-    # Display power callbacks for web server
-    def get_display_power():
-        global display_power_on
-        with display_power_lock:
-            return display_power_on
-
-    def set_display_power(state):
-        global display_power_on
-        with display_power_lock:
-            display_power_on = state
-        logging.info(f"Display power set to {'on' if state else 'off'}")
-
-    # Start web server if enabled
-    web_server = None
-    if settings.get('web', {}).get('web_enabled', False):
-        web_host = settings.get('web', {}).get('web_host', '0.0.0.0')
-        web_port = settings.get('web', {}).get('web_port', 5000)
-        web_server = start_web_server(config_dir, web_host, web_port,
-                                      get_display_power=get_display_power,
-                                      set_display_power=set_display_power)
-        if web_server:
-            logging.info(f"Web interface available at http://{web_host}:{web_port}")
-        else:
-            logging.warning("Web server could not be started")
-
-    # Start file watcher
-    file_watcher = None
-    if not args.__dict__.get('no_file_watch', False):  # Check if flag exists
-        file_watcher = start_file_watcher(config_dir, request_file_reload)
-        if file_watcher:
-            logging.info("File monitoring enabled for auto-reload")
-        else:
-            logging.warning("File monitoring could not be started - manual restart required for file changes")
-
-    # Start network monitor thread
-    network_thread = threading.Thread(target=network_monitor_loop, daemon=True)
-    network_thread.start()
-
-    # Start keyboard listener if available
-    keyboard_listener = None
-    keyboard_thread = None
-    if KEYBOARD_AVAILABLE:
-        if keyboard_backend == 'evdev':
-            # Start evdev listener in a separate thread
-            keyboard_thread = threading.Thread(
-                target=evdev_keyboard_listener,
-                args=(args.keyboard_device,),
-                daemon=True
-            )
-            keyboard_thread.start()
-            logging.info("Keyboard navigation enabled (evdev): Page Down (next heat), Page Up (prev heat), Period (reset)")
-        elif keyboard_backend == 'pynput':
-            keyboard_listener = keyboard.Listener(on_press=on_key_press_pynput)
-            keyboard_listener.start()
-            logging.info("Keyboard navigation enabled (pynput): Page Down (next heat), Page Up (prev heat), Period (reset)")
+    # Start peripheral services
+    web_server, file_watcher, keyboard_listener = setup_peripherals(
+        settings, config_dir, args.keyboard_device)
 
     # Load schedule file if available
     schedule_path = os.path.join(config_dir, "lynx.sch")
@@ -865,214 +1159,33 @@ def main():
                     file_reload_requested = False
 
             if is_file_reload:
-                # File reload requested - reload all data files
-                logging.info("Reloading event data from files...")
-
-                # Phase 1: Capture currently displayed state before reload
-                displayed_event_tuple = (args.event, args.round, current_heat)
-                displayed_schedule_index = current_schedule_index
-
-                # Track whether current_event.json changed
-                current_event_changed = False
-                incoming_event = args.event
-                incoming_round = args.round
-                incoming_heat = current_heat
-
-                # Reload lynx.evt with retry logic
-                new_events = load_file_with_retry(
-                    lambda: parse_lynx_file(args.file),
-                    "lynx.evt"
-                )
-                if new_events is not None:
-                    events = new_events
-                else:
-                    logging.warning("Could not reload lynx.evt - continuing with current data")
-
-                # Reload current_event.json with retry logic
-                new_current_event = load_file_with_retry(
-                    lambda: load_current_event(config_dir),
-                    "current_event.json"
-                )
-                if new_current_event is not None:
-                    # Store incoming values - don't update display yet (conditional jump later)
-                    incoming_event = new_current_event['event']
-                    incoming_round = new_current_event['round']
-                    incoming_heat = new_current_event['heat']
-                    current_event_changed = True
-                    # Always update the reference floor (keyboard can't go before this)
-                    original_event = incoming_event
-                    original_round = incoming_round
-                    original_heat = incoming_heat
-                    logging.info(f"Reference updated to Event={incoming_event}, Round={incoming_round}, Heat={incoming_heat}")
-                else:
-                    logging.warning("Could not reload current_event.json - continuing with current event selection")
-
-                # Reload colors.csv with retry logic
-                new_colors = load_file_with_retry(
-                    lambda: load_affiliation_colors(args.colors_csv),
-                    "colors.csv"
-                )
-                if new_colors is not None:
-                    affiliation_colors = new_colors
-                else:
-                    logging.warning("Could not reload colors.csv - continuing with current colors")
-
-                # Reload settings.toml so display settings (font_shift, line_height, etc.) update live
-                new_settings = load_file_with_retry(
-                    lambda: load_settings(config_dir),
-                    "settings.toml"
-                )
-                if new_settings is not None:
-                    disp = new_settings['display']
-                    new_fonts = new_settings['fonts']
-                    new_font_path = os.path.join(new_fonts['font_path'], new_fonts['font_name'])
-                    if new_font_path != args.font:
-                        args.font = new_font_path
-                        logging.info(f"Font updated: {args.font}")
-                    logging.info("Display settings reloaded from settings.toml")
-                else:
-                    logging.warning("Could not reload settings.toml - continuing with current display settings")
-
-                # Reload schedule (lynx.sch) if it exists
-                schedule_path = os.path.join(config_dir, "lynx.sch")
-                if os.path.exists(schedule_path):
-                    new_schedule = load_file_with_retry(
-                        lambda: parse_schedule(schedule_path),
-                        "lynx.sch"
-                    )
-                    if new_schedule is not None:
-                        # Validate against reloaded events
-                        validated_schedule = validate_schedule_entries(new_schedule, events)
-                        if validated_schedule:
-                            schedule = validated_schedule
-
-                            # Calculate starting_schedule_index (reference floor) from incoming event
-                            starting_schedule_index = find_schedule_index(schedule, incoming_event, incoming_round, incoming_heat)
-                            if starting_schedule_index == -1:
-                                starting_schedule_index = find_nearest_schedule_index(
-                                    schedule, incoming_event, incoming_round, incoming_heat
-                                )
-                                if starting_schedule_index == -1:
-                                    logging.warning("Reference event is past all scheduled events - disabling schedule navigation")
-                                    schedule = []
-                                else:
-                                    # Update incoming to the nearest valid schedule entry
-                                    incoming_event, incoming_round, incoming_heat = schedule[starting_schedule_index]
-                                    original_event = incoming_event
-                                    original_round = incoming_round
-                                    original_heat = incoming_heat
-                                    position_text = get_schedule_position_text(schedule, incoming_event, incoming_round, incoming_heat)
-                                    logging.info(f"Reference event not in schedule - nearest: {position_text}")
-
-                            # Recalculate current_schedule_index for the displayed event in the new schedule
-                            if schedule:
-                                displayed_schedule_index = find_schedule_index(
-                                    schedule, displayed_event_tuple[0], displayed_event_tuple[1], displayed_event_tuple[2]
-                                )
-                                if displayed_schedule_index == -1:
-                                    displayed_schedule_index = find_nearest_schedule_index(
-                                        schedule, displayed_event_tuple[0], displayed_event_tuple[1], displayed_event_tuple[2]
-                                    )
-                                    if displayed_schedule_index is None:
-                                        displayed_schedule_index = len(schedule) - 1
-                                current_schedule_index = displayed_schedule_index
-                        else:
-                            logging.warning("No valid schedule entries after reload - disabling schedule navigation")
-                            schedule = []
-                    else:
-                        logging.warning("Could not reload lynx.sch - continuing with current schedule")
-                else:
-                    # Schedule file was deleted - disable schedule navigation
-                    if schedule:
-                        logging.info("Schedule file removed - switching to heat increment mode")
-                        schedule = []
-
-                # Phase 4: Conditional jump - only jump display forward
-                if current_event_changed:
-                    if schedule:
-                        # Schedule mode: compare schedule positions
-                        if current_schedule_index < starting_schedule_index:
-                            # Display is behind reference - jump forward
-                            current_schedule_index = starting_schedule_index
-                            args.event, args.round, current_heat = schedule[current_schedule_index]
-                            position_text = get_schedule_position_text(schedule, args.event, args.round, current_heat)
-                            logging.info(f"Display behind reference - jumping forward to: {position_text}")
-                        else:
-                            logging.info(f"Display at or ahead of reference (pos {current_schedule_index + 1} >= ref {starting_schedule_index + 1}) - staying put")
-                    else:
-                        # No schedule: lexicographic tuple comparison
-                        incoming_tuple = (incoming_event, incoming_round, incoming_heat)
-                        if displayed_event_tuple < incoming_tuple:
-                            # Display is behind reference - jump forward
-                            args.event = incoming_event
-                            args.round = incoming_round
-                            current_heat = incoming_heat
-                            logging.info(f"Display behind reference - jumping forward to Event={args.event}, Round={args.round}, Heat={current_heat}")
-                        else:
-                            logging.info(f"Display at or ahead of reference {incoming_tuple} - staying put at {displayed_event_tuple}")
-
-                logging.info("Reload complete - resuming display")
+                result = handle_file_reload(
+                    config_dir, events, affiliation_colors, disp, schedule,
+                    args.file, args.font, args.colors_csv,
+                    args.event, args.round, current_heat,
+                    current_schedule_index, starting_schedule_index,
+                    original_event, original_round, original_heat)
+                events = result['events']
+                affiliation_colors = result['affiliation_colors']
+                disp = result['disp']
+                args.font = result['font']
+                args.event = result['event']
+                args.round = result['round']
+                current_heat = result['heat']
+                schedule = result['schedule']
+                starting_schedule_index = result['starting_schedule_index']
+                current_schedule_index = result['current_schedule_index']
+                original_event = result['original_event']
+                original_round = result['original_round']
+                original_heat = result['original_heat']
                 continue
 
             # Handle heat change request
             with heat_change_lock:
-                if schedule:
-                    # Schedule-based navigation
-                    if heat_change_request == 'next':
-                        if current_schedule_index < len(schedule) - 1:
-                            current_schedule_index += 1
-                            args.event, args.round, current_heat = schedule[current_schedule_index]
-                            position_text = get_schedule_position_text(schedule, args.event, args.round, current_heat)
-                            logging.info("Moving to next event: %s", position_text)
-                        else:
-                            logging.info("Already at last event in schedule (position %d of %d)",
-                                       current_schedule_index + 1, len(schedule))
-                    elif heat_change_request == 'prev':
-                        if current_schedule_index > starting_schedule_index:
-                            current_schedule_index -= 1
-                            args.event, args.round, current_heat = schedule[current_schedule_index]
-                            position_text = get_schedule_position_text(schedule, args.event, args.round, current_heat)
-                            logging.info("Moving to previous event: %s", position_text)
-                        else:
-                            logging.info("Cannot go before starting event (position %d of %d)",
-                                       starting_schedule_index + 1, len(schedule))
-                    elif heat_change_request == 'reset':
-                        if current_schedule_index != starting_schedule_index:
-                            current_schedule_index = starting_schedule_index
-                            args.event, args.round, current_heat = schedule[current_schedule_index]
-                            position_text = get_schedule_position_text(schedule, args.event, args.round, current_heat)
-                            logging.info("Resetting to starting event: %s", position_text)
-                        else:
-                            position_text = get_schedule_position_text(schedule, args.event, args.round, current_heat)
-                            logging.info("Already at starting event: %s", position_text)
-                else:
-                    # Heat increment mode (fallback when no schedule)
-                    if heat_change_request == 'next':
-                        # Try next heat
-                        next_heat = current_heat + 1
-                        if (args.event, args.round, next_heat) in events:
-                            current_heat = next_heat
-                            logging.info("Switching to heat %d", current_heat)
-                        else:
-                            logging.info("No heat %d found, staying on heat %d", next_heat, current_heat)
-                    elif heat_change_request == 'prev':
-                        # Try previous heat (minimum original_heat)
-                        prev_heat = max(original_heat, current_heat - 1)
-                        if prev_heat != current_heat and (args.event, args.round, prev_heat) in events:
-                            current_heat = prev_heat
-                            logging.info("Switching to heat %d", current_heat)
-                        else:
-                            logging.info("Cannot go to heat %d, staying on heat %d", prev_heat, current_heat)
-                    elif heat_change_request == 'reset':
-                        # Reset to reference event (latest current_event.json)
-                        if args.event != original_event or args.round != original_round or current_heat != original_heat:
-                            args.event = original_event
-                            args.round = original_round
-                            current_heat = original_heat
-                            logging.info("Resetting to reference Event=%d, Round=%d, Heat=%d", args.event, args.round, current_heat)
-                        else:
-                            logging.info("Already at reference Event=%d, Round=%d, Heat=%d", args.event, args.round, current_heat)
-
+                args.event, args.round, current_heat, current_schedule_index = handle_heat_change(
+                    heat_change_request, schedule, current_schedule_index, starting_schedule_index,
+                    args.event, args.round, current_heat,
+                    original_event, original_round, original_heat, events)
                 heat_change_request = None  # Clear the request
     except Exception as e:
         logging.exception("Failed to render event: %s", e)
