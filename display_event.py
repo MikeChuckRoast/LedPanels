@@ -265,25 +265,26 @@ def network_monitor_loop(state, interval=10):
         time.sleep(interval)
 
 
-def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int, height: int,
-                         line_height: int, header_line_height: int,
-                         interval: float, chain: int, parallel: int,
-                         gpio_slowdown: int, once: bool, font_shift: int,
-                         state: 'DisplayState',
-                         affiliation_colors: Optional[Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int], str]]] = None,
-                         header_rows: int = 1):
-    """Render the given event repeatedly (paging) onto the RGB matrix.
+def create_matrix(matrix_classes, width, height, chain, parallel, gpio_slowdown):
+    """Create and configure an RGB matrix and its offscreen canvas.
 
-    `matrix_classes` is the tuple returned by `try_import_rgbmatrix()`.
-    `state` is a DisplayState instance for checking heat changes, file reloads,
-    display power, and network status.
-    Returns True if should continue running, False if should reload with different heat.
+    Args:
+        matrix_classes: Tuple from get_matrix_backend (RGBMatrix, RGBMatrixOptions, graphics)
+        width, height: Panel dimensions in pixels
+        chain: Number of panels chained horizontally
+        parallel: Number of panels stacked vertically
+        gpio_slowdown: GPIO slowdown value
+
+    Returns:
+        Tuple of (matrix, canvas, graphics)
+
+    Raises:
+        RuntimeError: If no rgbmatrix backend is available
     """
     RGBMatrix, RGBMatrixOptions, graphics = matrix_classes
     if RGBMatrix is None:
         raise RuntimeError("No rgbmatrix backend available")
 
-    # Configure options
     options = RGBMatrixOptions()
     options.rows = height
     options.cols = width
@@ -293,6 +294,22 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
 
     matrix = RGBMatrix(options=options)
     canvas = matrix.CreateFrameCanvas()
+    return matrix, canvas, graphics
+
+
+def draw_event_on_matrix(event: Dict, matrix, canvas, graphics, font_path: str,
+                         line_height: int, header_line_height: int,
+                         interval: float, once: bool, font_shift: int,
+                         state: 'DisplayState',
+                         affiliation_colors: Optional[Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int], str]]] = None,
+                         header_rows: int = 1):
+    """Render the given event repeatedly (paging) onto the RGB matrix.
+
+    `matrix` and `canvas` are created once via `create_matrix()` and reused
+    across reloads.  `state` is a DisplayState instance for checking heat
+    changes, file reloads, display power, and network status.
+    Returns True if should continue running, False if should reload with different heat.
+    """
 
     canvas_width = canvas.width
     canvas_height = canvas.height
@@ -472,9 +489,9 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
             render_page(page_idx)
 
             # Sleep in small increments to check for heat changes and file reloads
-            elapsed = 0.0
             check_interval = 0.1  # Check every 100ms for better responsiveness
-            while elapsed < interval:
+            deadline = time.monotonic() + interval
+            while time.monotonic() < deadline:
                 # Check for heat change request
                 if state.has_heat_change_request():
                     matrix.Clear()
@@ -502,11 +519,10 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
                             return False
                     # Power back on — re-render current page
                     render_page(page_idx)
-                    elapsed = 0.0
+                    deadline = time.monotonic() + interval
                     continue
 
                 time.sleep(check_interval)
-                elapsed += check_interval
 
             page_idx = (page_idx + 1) % page_count
     except KeyboardInterrupt:
@@ -1168,6 +1184,11 @@ def main():
             logging.error("No rgbmatrix backend available: install 'rgbmatrix' or an emulator module named 'RGBMatrixEmulator' or 'rgbmatrix_emulator', or use --fpp for network output")
         sys.exit(4)
 
+    # Create matrix and canvas once — reused across reloads
+    matrix, canvas, graphics = create_matrix(
+        matrix_classes, args.width, args.height,
+        args.chain, args.parallel, args.gpio_slowdown)
+
     # Main loop - allows reloading when heat changes or files change
     try:
         while True:
@@ -1189,10 +1210,9 @@ def main():
                 event["name"] = f"#{current_heat} {event['name']}"
 
             # Draw the event
-            should_continue = draw_event_on_matrix(event, matrix_classes, args.font, args.width, args.height,
+            should_continue = draw_event_on_matrix(event, matrix, canvas, graphics, args.font,
                                  line_height=args.line_height, header_line_height=args.header_line_height,
-                                 interval=args.interval, chain=args.chain, parallel=args.parallel,
-                                 gpio_slowdown=args.gpio_slowdown, once=args.once, font_shift=disp['font_shift'],
+                                 interval=args.interval, once=args.once, font_shift=disp['font_shift'],
                                  state=state,
                                  affiliation_colors=affiliation_colors, header_rows=args.header_rows)
 
