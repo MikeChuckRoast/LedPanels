@@ -37,7 +37,8 @@ def sample_settings_dict() -> Dict[str, Any]:
             "font_shift": 7
         },
         "fonts": {
-            "font_path": "/path/to/font.bdf"
+            "font_path": "/path/to/fonts",
+            "font_name": "helvB12.bdf"
         },
         "files": {
             "lynx_file": "lynx.evt",

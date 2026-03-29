@@ -165,15 +165,12 @@ class TestColorLightGraphics:
 
 
 class TestBDFFont:
-    """Tests for BDF font parsing and rendering."""
+    """Tests for BDF font parsing via ColorLightGraphics.Font."""
 
-    @patch('socket.socket')
-    def test_loads_bdf_font(self, mock_socket):
-        """Test loading BDF font file."""
-        # BDFFont may not be exported, skip this test
-        pytest.skip("BDFFont is not exported from colorlight_output")
+    def test_loads_bdf_font(self, tmp_path):
+        """Test loading BDF font file via ColorLightGraphics.Font."""
+        from colorlight_output import ColorLightGraphics
 
-        # Create a minimal BDF font in memory
         bdf_content = """STARTFONT 2.1
 FONT test
 SIZE 12 75 75
@@ -199,7 +196,15 @@ BITMAP
 ENDCHAR
 ENDFONT
 """
-        # Test skipped - BDFFont not exported
+        font_file = tmp_path / "test.bdf"
+        font_file.write_text(bdf_content)
+
+        font = ColorLightGraphics.Font()
+        result = font.LoadFont(str(font_file))
+
+        assert result is True
+        assert 'A' in font.glyphs
+        assert font.CharacterWidth(ord('A')) == 8
 
 
 @skipif_windows

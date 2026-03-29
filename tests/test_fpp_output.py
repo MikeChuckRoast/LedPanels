@@ -64,16 +64,15 @@ class TestFPPMatrix:
 
         # After clear, buffer should be reset
 
-    @pytest.mark.skip(reason="FPPMatrix does not have Fill method")
-    def test_fill_sets_all_pixels(self):
-        """Test that Fill sets all pixels to specified color."""
+    def test_clear_sets_all_pixels_to_zero(self):
+        """Test that Clear sets all pixels to black."""
         matrix = FPPMatrix(host="127.0.0.1", port=4048, width=64, height=32)
 
-        matrix.Fill(100, 150, 200)
+        matrix.SetPixel(0, 0, 100, 150, 200)
+        matrix.Clear()
 
-        # Verify fill worked by checking a pixel
         import numpy as np
-        expected = np.array([100, 150, 200])
+        expected = np.array([0, 0, 0])
         assert np.array_equal(matrix.buffer[0][0], expected)
 
 
@@ -103,29 +102,32 @@ class TestDDPProtocol:
 class TestFPPGraphics:
     """Tests for FPPMatrix graphics methods."""
 
-    @pytest.mark.skip(reason="FPPMatrix does not have DrawText method")
     def test_draw_text(self):
-        """Test DrawText method."""
+        """Test DrawText via FPPGraphics."""
+        from fpp_output import FPPGraphics
+
         matrix = FPPMatrix(host="127.0.0.1", port=4048, width=64, height=32)
+        color = FPPGraphics.Color(255, 255, 255)
+        font = FPPGraphics.Font()
 
-        # Mock font
-        font = Mock()
-        font.CharacterWidth = Mock(return_value=8)
-
-        # Draw text
-        matrix.DrawText(5, 10, font, "Test")
+        # DrawText is a static method on FPPGraphics, not on FPPMatrix
+        FPPGraphics.DrawText(matrix, font, 5, 10, color, "Test")
 
         # Should not raise exception
 
-    @pytest.mark.skip(reason="FPPMatrix does not have DrawLine method")
     def test_draw_line(self):
-        """Test DrawLine method."""
+        """Test DrawLine via FPPGraphics."""
+        from fpp_output import FPPGraphics
+
         matrix = FPPMatrix(host="127.0.0.1", port=4048, width=64, height=32)
+        color = FPPGraphics.Color(255, 255, 255)
 
-        # Draw line from (0,0) to (10,10)
-        matrix.DrawLine(0, 0, 10, 10, 255, 255, 255)
+        # DrawLine is a static method on FPPGraphics, not on FPPMatrix
+        FPPGraphics.DrawLine(matrix, 0, 0, 10, 10, color)
 
-        # Should not raise exception
+        # Verify at least one pixel was set (diagonal line)
+        import numpy as np
+        assert np.any(matrix.buffer > 0)
 
 
 class TestCreateFPPBackend:

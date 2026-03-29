@@ -318,7 +318,6 @@ class TestLoadTeamColors:
         assert isinstance(team[1], tuple)  # secondary color RGB
         assert isinstance(team[2], str)    # name
 
-    @pytest.mark.skip(reason="parse_lynx_file raises FileNotFoundError instead of returning empty dict")
     def test_missing_file_returns_empty_dict(self, tmp_path):
         """Test that missing file returns empty dictionary."""
         nonexistent_file = tmp_path / "nonexistent.csv"
@@ -449,11 +448,9 @@ class TestParseLynxEvt:
         assert individual_event is not None
         assert len(individual_event["athletes"]) > 0
 
-    @pytest.mark.skip(reason="parse_lynx_file raises FileNotFoundError instead of returning empty dict")
-    def test_missing_file_returns_empty_dict(self, tmp_path):
-        """Test that missing file returns empty dictionary."""
+    def test_missing_file_raises_file_not_found(self, tmp_path):
+        """Test that missing file raises FileNotFoundError."""
         nonexistent_file = tmp_path / "nonexistent.evt"
 
-        events = parse_lynx_file(str(nonexistent_file))
-
-        assert events == {}
+        with pytest.raises(FileNotFoundError):
+            parse_lynx_file(str(nonexistent_file))
