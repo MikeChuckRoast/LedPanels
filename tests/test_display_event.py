@@ -2,6 +2,7 @@
 Integration tests for display_event.py main application.
 """
 
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -634,3 +635,155 @@ class TestConditionalJumpKeyboardFloor:
         # Should stay at index 2
         assert current_schedule_index == 2
         assert schedule[current_schedule_index] == (7, 1, 1)
+
+
+class TestGetDefaultGateway:
+    """Tests for default gateway discovery."""
+
+    @patch('display_event.platform.system', return_value='Windows')
+    @patch('display_event.subprocess.run')
+    def test_windows_gateway_discovery(self, mock_run, mock_system):
+        """Test gateway discovery on Windows via route print."""
+        from display_event import get_default_gateway
+
+        mock_run.return_value = MagicMock(
+            stdout=(
+                "===========================================================================\n"
+                "Active Routes:\n"
+                "Network Destination        Netmask          Gateway       Interface  Metric\n"
+                "          0.0.0.0          0.0.0.0      192.168.1.1    192.168.1.50     25\n"
+            )
+        )
+        assert get_default_gateway() == '192.168.1.1'
+
+    @patch('display_event.platform.system', return_value='Linux')
+    def test_linux_gateway_discovery(self, mock_system, tmp_path):
+        """Test gateway discovery on Linux via /proc/net/route."""
+        from display_event import get_default_gateway
+
+        # 192.168.1.1 in little-endian hex = 0101A8C0
+        route_content = (
+            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
+            "eth0\t00000000\t0101A8C0\t0003\t0\t0\t0\t00000000\n"
+        )
+        route_file = tmp_path / "route"
+        route_file.write_text(route_content)
+
+        with patch('display_event.Path') as mock_path_cls:
+            mock_route = MagicMock()
+            mock_route.exists.return_value = True
+            mock_route.read_text.return_value = route_content
+            # Make Path('/proc/net/route') return our mock
+            mock_path_cls.return_value = mock_route
+            # But for other Path calls, use the real Path
+            result = get_default_gateway()
+            assert result == '192.168.1.1'
+
+    @patch('display_event.platform.system', return_value='Windows')
+    @patch('display_event.subprocess.run', side_effect=Exception("no route"))
+    def test_returns_none_on_failure(self, mock_run, mock_system):
+        """Test that gateway discovery returns None on error."""
+        from display_event import get_default_gateway
+
+        assert get_default_gateway() is None
+
+
+class TestCheckNetworkConnectivity:
+    """Tests for network ping check."""
+
+    @patch('display_event.platform.system', return_value='Windows')
+    @patch('display_event.subprocess.run')
+    def test_returns_true_when_reachable(self, mock_run, mock_system):
+        """Test returns True when ping succeeds."""
+        from display_event import check_network_connectivity
+
+        mock_run.return_value = MagicMock(returncode=0)
+        assert check_network_connectivity('192.168.1.1') is True
+
+    @patch('display_event.platform.system', return_value='Windows')
+    @patch('display_event.subprocess.run')
+    def test_returns_false_when_unreachable(self, mock_run, mock_system):
+        """Test returns False when ping fails."""
+        from display_event import check_network_connectivity
+
+        mock_run.return_value = MagicMock(returncode=1)
+        assert check_network_connectivity('192.168.1.1') is False
+
+    @patch('display_event.platform.system', return_value='Linux')
+    @patch('display_event.subprocess.run')
+    def test_linux_ping_command(self, mock_run, mock_system):
+        """Test correct ping command on Linux."""
+        from display_event import check_network_connectivity
+
+        mock_run.return_value = MagicMock(returncode=0)
+        check_network_connectivity('10.0.0.1')
+        mock_run.assert_called_once_with(
+            ['ping', '-c', '1', '-W', '1', '10.0.0.1'],
+            capture_output=True, timeout=3
+        )
+
+    @patch('display_event.platform.system', return_value='Windows')
+    @patch('display_event.subprocess.run')
+    def test_windows_ping_command(self, mock_run, mock_system):
+        """Test correct ping command on Windows."""
+        from display_event import check_network_connectivity
+
+        mock_run.return_value = MagicMock(returncode=0)
+        check_network_connectivity('10.0.0.1')
+        mock_run.assert_called_once_with(
+            ['ping', '-n', '1', '-w', '1000', '10.0.0.1'],
+            capture_output=True, timeout=3
+        )
+
+    @patch('display_event.subprocess.run', side_effect=subprocess.TimeoutExpired('ping', 3))
+    def test_returns_false_on_timeout(self, mock_run):
+        """Test returns False when ping times out."""
+        from display_event import check_network_connectivity
+
+        assert check_network_connectivity('192.168.1.1') is False
+
+
+class TestNetworkMonitorLoop:
+    """Tests for network monitor thread behavior."""
+
+    @patch('display_event.check_network_connectivity', return_value=True)
+    @patch('display_event.get_default_gateway', return_value='192.168.1.1')
+    def test_sets_connected_when_reachable(self, mock_gw, mock_ping):
+        """Test that network_connected is True when gateway is reachable."""
+        import display_event
+
+        display_event.network_connected = False  # Start disconnected
+        # Run one iteration by mocking time.sleep to raise after first call
+        with patch('display_event.time.sleep', side_effect=StopIteration):
+            try:
+                display_event.network_monitor_loop(interval=10)
+            except StopIteration:
+                pass
+        with display_event.network_status_lock:
+            assert display_event.network_connected is True
+
+    @patch('display_event.check_network_connectivity', return_value=False)
+    @patch('display_event.get_default_gateway', return_value='192.168.1.1')
+    def test_sets_disconnected_when_unreachable(self, mock_gw, mock_ping):
+        """Test that network_connected is False when gateway is unreachable."""
+        import display_event
+
+        display_event.network_connected = True  # Start connected
+        with patch('display_event.time.sleep', side_effect=StopIteration):
+            try:
+                display_event.network_monitor_loop(interval=10)
+            except StopIteration:
+                pass
+        with display_event.network_status_lock:
+            assert display_event.network_connected is False
+
+    @patch('display_event.get_default_gateway', return_value=None)
+    def test_exits_when_no_gateway(self, mock_gw):
+        """Test that monitor exits gracefully when no gateway found."""
+        import display_event
+
+        display_event.network_connected = True
+        # Should return immediately without looping
+        display_event.network_monitor_loop(interval=10)
+        with display_event.network_status_lock:
+            assert display_event.network_connected is True

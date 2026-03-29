@@ -23,6 +23,8 @@ Design notes:
 import argparse
 import logging
 import os
+import platform
+import subprocess
 import sys
 import threading
 import time
@@ -78,9 +80,115 @@ file_reload_requested = False
 display_power_lock = threading.Lock()
 display_power_on = True
 
+# Global state for network connectivity
+network_status_lock = threading.Lock()
+network_connected = True
+
 
 # Note: Parsing and formatting functions moved to event_parser.py
 # Matrix backend functions moved to matrix_backend.py and fpp_output.py
+
+
+def get_default_gateway():
+    """Discover the default gateway IP address.
+
+    Returns:
+        Gateway IP string, or None if it cannot be determined.
+    """
+    try:
+        if platform.system() == 'Windows':
+            result = subprocess.run(
+                ['route', 'print', '0.0.0.0'],
+                capture_output=True, text=True, timeout=5
+            )
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 3 and parts[0] == '0.0.0.0':
+                    return parts[2]
+        else:
+            # Linux/macOS
+            route_file = Path('/proc/net/route')
+            if route_file.exists():
+                for line in route_file.read_text().splitlines()[1:]:
+                    fields = line.split()
+                    if len(fields) >= 3 and fields[1] == '00000000':
+                        # Gateway is in hex, little-endian
+                        gw_hex = fields[2]
+                        gw_bytes = bytes.fromhex(gw_hex)
+                        return f'{gw_bytes[3]}.{gw_bytes[2]}.{gw_bytes[1]}.{gw_bytes[0]}'
+            else:
+                # macOS fallback
+                result = subprocess.run(
+                    ['route', '-n', 'get', 'default'],
+                    capture_output=True, text=True, timeout=5
+                )
+                for line in result.stdout.splitlines():
+                    if 'gateway:' in line:
+                        return line.split('gateway:')[1].strip()
+    except Exception as e:
+        logging.debug("Failed to discover default gateway: %s", e)
+    return None
+
+
+def check_network_connectivity(gateway):
+    """Ping the gateway to check network connectivity.
+
+    Args:
+        gateway: IP address to ping
+
+    Returns:
+        True if reachable, False otherwise
+    """
+    try:
+        if platform.system() == 'Windows':
+            cmd = ['ping', '-n', '1', '-w', '1000', gateway]
+        else:
+            cmd = ['ping', '-c', '1', '-W', '1', gateway]
+        result = subprocess.run(cmd, capture_output=True, timeout=3)
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def network_monitor_loop(interval=10):
+    """Background thread that monitors network connectivity.
+
+    Pings the default gateway periodically and updates the global
+    network_connected flag.
+
+    Args:
+        interval: Seconds between checks (default 10)
+    """
+    global network_connected
+    gateway = get_default_gateway()
+    if gateway is None:
+        logging.warning("Could not determine default gateway - network monitoring disabled")
+        return
+    logging.info("Network monitoring started (gateway: %s, interval: %ds)", gateway, interval)
+    was_connected = True
+
+    while True:
+        reachable = check_network_connectivity(gateway)
+
+        with network_status_lock:
+            network_connected = reachable
+
+        # Log state transitions
+        if reachable and not was_connected:
+            logging.info("Network connectivity restored (gateway %s reachable)", gateway)
+        elif not reachable and was_connected:
+            logging.warning("Network connectivity lost (gateway %s unreachable)", gateway)
+
+        was_connected = reachable
+
+        # On failure, re-discover gateway in case it changed
+        if not reachable:
+            new_gw = get_default_gateway()
+            if new_gw and new_gw != gateway:
+                logging.info("Default gateway changed: %s -> %s", gateway, new_gw)
+                gateway = new_gw
+
+        time.sleep(interval)
 
 
 def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int, height: int,
@@ -262,7 +370,17 @@ def draw_event_on_matrix(event: Dict, matrix_classes, font_path: str, width: int
                 else:
                     # For individual: draw name normally
                     name_txt = format_athlete_line(athlete, is_relay=False)
-                    graphics.DrawText(canvas, font, name_x, y_txt, text_color, name_txt)        # Push to matrix
+                    graphics.DrawText(canvas, font, name_x, y_txt, text_color, name_txt)
+
+            # Draw network status indicator (red bottom row when disconnected)
+            net_ok = True
+            with network_status_lock:
+                net_ok = network_connected
+            if not net_ok:
+                red = graphics.Color(255, 0, 0)
+                fill_rectangle(canvas, graphics, 0, canvas_height - 1, canvas_width - 1, canvas_height - 1, red)
+
+        # Push to matrix
         try:
             canvas = matrix.SwapOnVSync(canvas)
         except Exception as ex:
@@ -627,6 +745,10 @@ def main():
             logging.info("File monitoring enabled for auto-reload")
         else:
             logging.warning("File monitoring could not be started - manual restart required for file changes")
+
+    # Start network monitor thread
+    network_thread = threading.Thread(target=network_monitor_loop, daemon=True)
+    network_thread.start()
 
     # Start keyboard listener if available
     keyboard_listener = None
