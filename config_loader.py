@@ -32,7 +32,7 @@ def ensure_config_directory(config_dir: str) -> None:
 
     try:
         config_path.mkdir(parents=True, exist_ok=True)
-        logging.info(f"Config directory ready: {config_dir}")
+        logging.info("Config directory ready: %s", config_dir)
     except Exception as e:
         raise ConfigError(f"Failed to create config directory '{config_dir}': {e}")
 
@@ -43,7 +43,7 @@ def ensure_config_directory(config_dir: str) -> None:
         try:
             with open(current_event_path, "w", encoding="utf-8") as f:
                 json.dump(default_event, f, indent=2)
-            logging.info(f"Created default current_event.json")
+            logging.info("Created default current_event.json")
         except Exception as e:
             raise ConfigError(f"Failed to create default current_event.json: {e}")
 
@@ -126,7 +126,7 @@ gpio_slowdown = 4            # GPIO slowdown
         try:
             with open(settings_path, "w", encoding="utf-8") as f:
                 f.write(default_settings)
-            logging.info(f"Created default settings.toml")
+            logging.info("Created default settings.toml")
         except Exception as e:
             raise ConfigError(f"Failed to create default settings.toml: {e}")
 
@@ -151,7 +151,7 @@ def load_settings(config_dir: str) -> Dict[str, Any]:
     try:
         with open(settings_path, "rb") as f:
             settings = tomllib.load(f)
-        logging.info(f"Loaded settings from: {settings_path}")
+        logging.info("Loaded settings from: %s", settings_path)
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"Invalid TOML in settings file: {e}")
     except Exception as e:
@@ -282,11 +282,11 @@ def load_settings(config_dir: str) -> Dict[str, Any]:
 
     # Log loaded configuration
     logging.info("Configuration loaded successfully:")
-    logging.info(f"  Hardware: {hw['width']}x{hw['height']}, chain={hw['chain']}, parallel={hw['parallel']}")
-    logging.info(f"  Display: line_height={disp['line_height']}, header={disp['header_line_height']}, interval={disp['interval']}s")
-    logging.info(f"  Files: lynx={files['lynx_file']}, colors={files['colors_file']}")
-    logging.info(f"  Font: {fonts['font_path']}/{fonts['font_name']}")
-    logging.info(f"  Network: FPP={net['fpp_enabled']}, ColorLight={net['colorlight_enabled']}")
+    logging.info("  Hardware: %dx%d, chain=%d, parallel=%d", hw['width'], hw['height'], hw['chain'], hw['parallel'])
+    logging.info("  Display: line_height=%d, header=%d, interval=%ss", disp['line_height'], disp['header_line_height'], disp['interval'])
+    logging.info("  Files: lynx=%s, colors=%s", files['lynx_file'], files['colors_file'])
+    logging.info("  Font: %s/%s", fonts['font_path'], fonts['font_name'])
+    logging.info("  Network: FPP=%s, ColorLight=%s", net['fpp_enabled'], net['colorlight_enabled'])
 
     return settings
 
@@ -311,7 +311,7 @@ def load_current_event(config_dir: str) -> Dict[str, int]:
     try:
         with open(event_path, "r", encoding="utf-8") as f:
             event_data = json.load(f)
-        logging.info(f"Loaded current event from: {event_path}")
+        logging.info("Loaded current event from: %s", event_path)
     except json.JSONDecodeError as e:
         raise ConfigError(f"Invalid JSON in current_event.json: {e}")
     except Exception as e:
@@ -331,7 +331,7 @@ def load_current_event(config_dir: str) -> Dict[str, int]:
         if value < 1:
             raise ConfigError(f"'{field}' must be >= 1 in current_event.json")
 
-    logging.info(f"  Current event: Event={event_data['event']}, Round={event_data['round']}, Heat={event_data['heat']}")
+    logging.info("  Current event: Event=%d, Round=%d, Heat=%d", event_data['event'], event_data['round'], event_data['heat'])
 
     return event_data
 

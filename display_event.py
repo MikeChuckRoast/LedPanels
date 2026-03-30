@@ -311,6 +311,13 @@ def draw_event_on_matrix(event: Dict, matrix, canvas, graphics, font_path: str,
     Returns True if should continue running, False if should reload with different heat.
     """
 
+    # Layout constants (pixels)
+    LANE_X = 1                 # Left margin for lane column
+    LANE_NAME_GAP = 3          # Gap between lane column and name column
+    SUFFIX_PADDING = 2         # Extra padding around relay suffix letter
+    NAME_SUFFIX_GAP = 3        # Gap between team name and suffix column
+    EDGE_MARGIN = 1            # Right-edge margin
+
     canvas_width = canvas.width
     canvas_height = canvas.height
 
@@ -358,8 +365,8 @@ def draw_event_on_matrix(event: Dict, matrix, canvas, graphics, font_path: str,
         if w > lane_col_width:
             lane_col_width = w
     lane_col_width = max(lane_col_width, measure_text_width(font, "88"))  # at least space for two-digit lane
-    lane_x = 1
-    name_x = lane_x + lane_col_width + 3
+    lane_x = LANE_X
+    name_x = lane_x + lane_col_width + LANE_NAME_GAP
 
     def render_page(page_index: int):
         nonlocal canvas
@@ -443,14 +450,14 @@ def draw_event_on_matrix(event: Dict, matrix, canvas, graphics, font_path: str,
                         # Team has duplicates - show suffix in right column
                         suffix = extract_relay_suffix((athlete.get("affiliation") or "").strip())
                         # Reserve space for suffix
-                        suffix_col_width = measure_text_width(font, "W") + 2  # Use 'W' as widest letter
-                        suffix_x = canvas_width - suffix_col_width - 1
+                        suffix_col_width = measure_text_width(font, "W") + SUFFIX_PADDING
+                        suffix_x = canvas_width - suffix_col_width - EDGE_MARGIN
                         # Calculate available width for team name (between name_x and suffix column)
-                        available_width = suffix_x - name_x - 3  # Leave 3px gap before suffix
+                        available_width = suffix_x - name_x - NAME_SUFFIX_GAP
                     else:
                         # Team is unique - no suffix, use full width
                         suffix = ""
-                        available_width = canvas_width - name_x - 1
+                        available_width = canvas_width - name_x - EDGE_MARGIN
 
                     # Truncate team name if needed to fit available space
                     team_name = truncate_text_to_width(font, team_name, available_width)
@@ -597,9 +604,7 @@ def find_keyboard_device():
         logging.warning("Or specify device manually with: --keyboard-device /dev/input/eventX")
         return None
     except Exception as e:
-        logging.error("Error finding keyboard device: %s", e)
-        import traceback
-        logging.error(traceback.format_exc())
+        logging.exception("Error finding keyboard device: %s", e)
         return None
 
 
@@ -644,9 +649,7 @@ def evdev_keyboard_listener(state, device_path=None):
                         state.request_heat_change('reset')
                         logging.info(">>> Period pressed - reset to original heat requested")
     except Exception as e:
-        logging.error("Keyboard listener error: %s", e)
-        import traceback
-        logging.error(traceback.format_exc())
+        logging.exception("Keyboard listener error: %s", e)
 
 
 def make_pynput_handler(state):
@@ -697,13 +700,13 @@ def load_file_with_retry(load_func, file_description: str, max_retries: int = 3)
         except (IOError, OSError, FileNotFoundError) as e:
             if attempt < max_retries - 1:
                 delay = 0.1 * (attempt + 1)
-                logging.warning(f"Failed to load {file_description} (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {delay}s...")
+                logging.warning("Failed to load %s (attempt %d/%d): %s. Retrying in %ss...", file_description, attempt + 1, max_retries, e, delay)
                 time.sleep(delay)
             else:
-                logging.error(f"Failed to load {file_description} after {max_retries} attempts: {e}")
+                logging.error("Failed to load %s after %d attempts: %s", file_description, max_retries, e)
                 return None
         except Exception as e:
-            logging.error(f"Unexpected error loading {file_description}: {e}")
+            logging.error("Unexpected error loading %s: %s", file_description, e)
             return None
     return None
 
@@ -774,7 +777,7 @@ def handle_file_reload(config_dir, events, affiliation_colors, disp, schedule,
         original_event = incoming_event
         original_round = incoming_round
         original_heat = incoming_heat
-        logging.info(f"Reference updated to Event={incoming_event}, Round={incoming_round}, Heat={incoming_heat}")
+        logging.info("Reference updated to Event=%d, Round=%d, Heat=%d", incoming_event, incoming_round, incoming_heat)
     else:
         logging.warning("Could not reload current_event.json - continuing with current event selection")
 
@@ -800,7 +803,7 @@ def handle_file_reload(config_dir, events, affiliation_colors, disp, schedule,
         new_font_path = os.path.join(new_fonts['font_path'], new_fonts['font_name'])
         if new_font_path != args_font:
             font = new_font_path
-            logging.info(f"Font updated: {font}")
+            logging.info("Font updated: %s", font)
         logging.info("Display settings reloaded from settings.toml")
     else:
         logging.warning("Could not reload settings.toml - continuing with current display settings")
@@ -834,7 +837,7 @@ def handle_file_reload(config_dir, events, affiliation_colors, disp, schedule,
                         original_round = incoming_round
                         original_heat = incoming_heat
                         position_text = get_schedule_position_text(schedule, incoming_event, incoming_round, incoming_heat)
-                        logging.info(f"Reference event not in schedule - nearest: {position_text}")
+                        logging.info("Reference event not in schedule - nearest: %s", position_text)
 
                 # Recalculate current_schedule_index for the displayed event in the new schedule
                 if schedule:
@@ -872,9 +875,9 @@ def handle_file_reload(config_dir, events, affiliation_colors, disp, schedule,
                 current_schedule_index = starting_schedule_index
                 result_event, result_round, result_heat = schedule[current_schedule_index]
                 position_text = get_schedule_position_text(schedule, result_event, result_round, result_heat)
-                logging.info(f"Display behind reference - jumping forward to: {position_text}")
+                logging.info("Display behind reference - jumping forward to: %s", position_text)
             else:
-                logging.info(f"Display at or ahead of reference (pos {current_schedule_index + 1} >= ref {starting_schedule_index + 1}) - staying put")
+                logging.info("Display at or ahead of reference (pos %d >= ref %d) - staying put", current_schedule_index + 1, starting_schedule_index + 1)
         else:
             # No schedule: lexicographic tuple comparison
             incoming_tuple = (incoming_event, incoming_round, incoming_heat)
@@ -883,9 +886,9 @@ def handle_file_reload(config_dir, events, affiliation_colors, disp, schedule,
                 result_event = incoming_event
                 result_round = incoming_round
                 result_heat = incoming_heat
-                logging.info(f"Display behind reference - jumping forward to Event={result_event}, Round={result_round}, Heat={result_heat}")
+                logging.info("Display behind reference - jumping forward to Event=%d, Round=%d, Heat=%d", result_event, result_round, result_heat)
             else:
-                logging.info(f"Display at or ahead of reference {incoming_tuple} - staying put at {displayed_event_tuple}")
+                logging.info("Display at or ahead of reference %s - staying put at %s", incoming_tuple, displayed_event_tuple)
 
     logging.info("Reload complete - resuming display")
 
@@ -1008,7 +1011,7 @@ def setup_peripherals(settings, config_dir, args_keyboard_device, state):
                                       get_display_power=state.get_display_power,
                                       set_display_power=state.set_display_power)
         if web_server:
-            logging.info(f"Web interface available at http://{web_host}:{web_port}")
+            logging.info("Web interface available at http://%s:%d", web_host, web_port)
         else:
             logging.warning("Web server could not be started")
 
@@ -1056,7 +1059,7 @@ def main():
     try:
         ensure_config_directory(config_dir)
     except ConfigError as e:
-        logging.error(f"Configuration error: {e}")
+        logging.error("Configuration error: %s", e)
         sys.exit(1)
 
     # Load settings and current event
@@ -1064,7 +1067,7 @@ def main():
         settings = load_settings(config_dir)
         current_event = load_current_event(config_dir)
     except ConfigError as e:
-        logging.error(f"Configuration error: {e}")
+        logging.error("Configuration error: %s", e)
         sys.exit(1)
 
     # Extract settings for easier access
@@ -1149,9 +1152,9 @@ def main():
                     args.round = rnd
                     args.heat = ht
                     position_text = get_schedule_position_text(schedule, evt, rnd, ht)
-                    logging.info(f"Initial event not in schedule - switched to nearest: {position_text}")
+                    logging.info("Initial event not in schedule - switched to nearest: %s", position_text)
             if schedule:
-                logging.info(f"Schedule navigation enabled - starting at position {starting_schedule_index + 1} of {len(schedule)}")
+                logging.info("Schedule navigation enabled - starting at position %d of %d", starting_schedule_index + 1, len(schedule))
                 logging.info(get_schedule_position_text(schedule, args.event, args.round, args.heat))
         else:
             logging.warning("No valid entries in schedule - using heat increment mode")

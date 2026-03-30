@@ -65,7 +65,7 @@ class ConfigFileHandler(FileSystemEventHandler):
             return
 
         if self.should_monitor_file(event.src_path):
-            logging.debug(f"File modified: {event.src_path}")
+            logging.debug("File modified: %s", event.src_path)
             self.debounce_reload(event.src_path)
 
     def on_moved(self, event: FileSystemEvent):
@@ -79,7 +79,7 @@ class ConfigFileHandler(FileSystemEventHandler):
 
         # Check destination path for atomic writes (temp -> final)
         if hasattr(event, 'dest_path') and self.should_monitor_file(event.dest_path):
-            logging.debug(f"File moved to: {event.dest_path}")
+            logging.debug("File moved to: %s", event.dest_path)
             self.debounce_reload(event.dest_path)
 
     def on_created(self, event: FileSystemEvent):
@@ -92,7 +92,7 @@ class ConfigFileHandler(FileSystemEventHandler):
             return
 
         if self.should_monitor_file(event.src_path):
-            logging.debug(f"File created: {event.src_path}")
+            logging.debug("File created: %s", event.src_path)
             self.debounce_reload(event.src_path)
 
     def debounce_reload(self, file_path: str):
@@ -120,7 +120,7 @@ class ConfigFileHandler(FileSystemEventHandler):
         Args:
             file_path: Path to file that changed
         """
-        logging.info(f"File change detected: {os.path.basename(file_path)} - reload requested")
+        logging.info("File change detected: %s - reload requested", os.path.basename(file_path))
         self.reload_callback()
 
 
@@ -179,7 +179,7 @@ class PollingFileWatcher:
                         self.file_mtimes[file_path] = current_mtime
                         # Simple debounce: wait a bit before triggering
                         time.sleep(0.3)
-                        logging.info(f"File change detected: {os.path.basename(file_path)} - reload requested")
+                        logging.info("File change detected: %s - reload requested", os.path.basename(file_path))
                         self.reload_callback()
                         break  # Only reload once per poll
 
@@ -207,10 +207,10 @@ def start_file_watcher(config_dir: str, reload_callback, use_polling: bool = Fal
             observer = Observer()
             observer.schedule(event_handler, config_dir, recursive=False)
             observer.start()
-            logging.info(f"Started file watcher (watchdog) for: {config_dir}")
+            logging.info("Started file watcher (watchdog) for: %s", config_dir)
             return observer
         except Exception as e:
-            logging.warning(f"Failed to start watchdog observer: {e}")
+            logging.warning("Failed to start watchdog observer: %s", e)
             # Fall through to polling
 
     # Use polling as fallback
@@ -219,5 +219,5 @@ def start_file_watcher(config_dir: str, reload_callback, use_polling: bool = Fal
         watcher.start()
         return watcher
     except Exception as e:
-        logging.error(f"Failed to start file watcher: {e}")
+        logging.error("Failed to start file watcher: %s", e)
         return None

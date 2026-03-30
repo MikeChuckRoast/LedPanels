@@ -11,7 +11,11 @@ Handles:
 import csv
 import logging
 import os
+import re
 from typing import Dict, List, Optional, Tuple
+
+# Pre-compiled pattern for relay affiliation detection (e.g. 'RICO  A')
+_RELAY_AFFILIATION_RE = re.compile(r'^\w{2,4}\s+\w$')
 
 
 def parse_hex_color(hex_str: str) -> Tuple[int, int, int]:
@@ -152,7 +156,6 @@ def is_relay_event(athletes: List[Dict]) -> bool:
     if not athletes:
         return False
 
-    import re
     for athlete in athletes:
         first = (athlete.get("first") or "").strip()
         last = (athlete.get("last") or "").strip()
@@ -163,7 +166,7 @@ def is_relay_event(athletes: List[Dict]) -> bool:
             return False
 
         # Check if affiliation matches relay pattern (2-4 letters, spaces, then a letter)
-        if not re.match(r'^\w{2,4}\s+\w$', affil):
+        if not _RELAY_AFFILIATION_RE.match(affil):
             return False
 
     return True
