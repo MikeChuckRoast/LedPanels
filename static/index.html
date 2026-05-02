@@ -24,7 +24,15 @@
       <!-- Display mode selector (only visible when running under display_manager) -->
       <div id="mode-section" style="display:none">
         <div class="card">
-          <h2>Display Mode</h2>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0">Display Mode</h2>
+            <button
+              id="power-toggle-mode"
+              onclick="toggleDisplayPower()"
+              class="power-btn power-on"
+              title="Toggle display power"
+            >Display On</button>
+          </div>
           <div id="mode-status-bar" style="margin-bottom:12px; font-size:13px; color:#7f8c8d;">Loading…</div>
           <div id="mode-radio-group" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px;"></div>
           <div id="mode-settings-panel"></div>
@@ -367,14 +375,16 @@
       }
 
       function updatePowerButton() {
-        const btn = document.getElementById("power-toggle");
-        if (!btn) return;
-        if (displayPowerOn) {
-          btn.textContent = "Display On";
-          btn.className = "power-btn power-on";
-        } else {
-          btn.textContent = "Display Off";
-          btn.className = "power-btn power-off";
+        for (const id of ["power-toggle", "power-toggle-mode"]) {
+          const btn = document.getElementById(id);
+          if (!btn) continue;
+          if (displayPowerOn) {
+            btn.textContent = "Display On";
+            btn.className = "power-btn power-on";
+          } else {
+            btn.textContent = "Display Off";
+            btn.className = "power-btn power-off";
+          }
         }
       }
 
