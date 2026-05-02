@@ -41,7 +41,8 @@ from display_utils import (calculate_text_baseline, draw_centered_text,
 from event_parser import (extract_relay_suffix, fill_lanes_with_empty_rows,
                           format_athlete_line, get_duplicate_relay_teams,
                           is_relay_event, load_affiliation_colors,
-                          paginate_items, parse_lynx_file)
+                          paginate_items, parse_lynx_file,
+                          resolve_affiliation_colors)
 from file_watcher import start_file_watcher
 from matrix_backend import get_matrix_backend
 from schedule_parser import (find_nearest_schedule_index, find_schedule_index,
@@ -419,8 +420,8 @@ def draw_event_on_matrix(event: Dict, matrix, canvas, graphics, font_path: str,
             text_color = white
             bg_color = black
 
-            if has_athlete and affiliation_colors and color_key in affiliation_colors:
-                bg_rgb, text_rgb, display_name = affiliation_colors[color_key]
+            if has_athlete and affiliation_colors:
+                bg_rgb, text_rgb, display_name = resolve_affiliation_colors(color_key, affiliation_colors)
                 bg_color = graphics.Color(bg_rgb[0], bg_rgb[1], bg_rgb[2])
                 text_color = graphics.Color(text_rgb[0], text_rgb[1], text_rgb[2])
 

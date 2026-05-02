@@ -82,6 +82,47 @@ def load_affiliation_colors(csv_path: str) -> Dict[str, Tuple[Tuple[int, int, in
     return colors
 
 
+def resolve_affiliation_colors(
+    key: str,
+    colors: Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int], str]],
+) -> Tuple[Tuple[int, int, int], Tuple[int, int, int], str]:
+    """Resolve colors for a team/affiliation key with robust fallbacks.
+
+    Matching order:
+    1) Exact affiliation key match
+    2) Case-insensitive affiliation key match
+    3) Case-insensitive display-name match
+    4) Default black background / white text fallback
+
+    Returns:
+        (bg_rgb, text_rgb, display_name)
+    """
+    default_bg = (0, 0, 0)
+    default_text = (255, 255, 255)
+
+    if not colors:
+        return default_bg, default_text, (key or "")
+
+    clean_key = (key or "").strip()
+    if not clean_key:
+        return default_bg, default_text, ""
+
+    # Fast path: exact key
+    if clean_key in colors:
+        bg_rgb, text_rgb, display_name = colors[clean_key]
+        return bg_rgb, text_rgb, display_name
+
+    # Case-insensitive key / display-name match
+    lowered = clean_key.lower()
+    for affil, (bg_rgb, text_rgb, display_name) in colors.items():
+        if affil.lower() == lowered:
+            return bg_rgb, text_rgb, display_name
+        if (display_name or "").strip().lower() == lowered:
+            return bg_rgb, text_rgb, display_name
+
+    return default_bg, default_text, clean_key
+
+
 def parse_lynx_file(path: str) -> Dict[Tuple[int, int, int], Dict]:
     """Parse the lynx.evt CSV file into a mapping of (event, round, heat) -> event dict.
 
