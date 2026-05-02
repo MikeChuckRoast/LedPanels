@@ -375,6 +375,29 @@ def main():
         "--parallel",type=int, default=4,   help="Parallel chains (default: 4)"
     )
     parser.add_argument(
+        "--gpio-slowdown", type=int, default=3, help="GPIO slowdown (default: 3)"
+    )
+    parser.add_argument(
+        "--fpp", action="store_true", default=False,
+        help="Use FPP output instead of direct matrix control"
+    )
+    parser.add_argument(
+        "--fpp-host", default="127.0.0.1",
+        help="FPP host IP address"
+    )
+    parser.add_argument(
+        "--fpp-port", type=int, default=4048,
+        help="FPP DDP port"
+    )
+    parser.add_argument(
+        "--colorlight", action="store_true", default=False,
+        help="Send frames to ColorLight 5A-75B via raw Ethernet (requires root/sudo)"
+    )
+    parser.add_argument(
+        "--colorlight-interface", default="eth0",
+        help="Network interface for ColorLight (e.g., eth0)"
+    )
+    parser.add_argument(
         "--font",
         default="fonts/helvB14.bdf",
         help="BDF font path (default: fonts/helvB14.bdf)"
@@ -420,14 +443,22 @@ def main():
     team_colors = load_affiliation_colors(args.colors_csv)
 
     # -- Set up LED matrix ------------------------------------------------
-    RGBMatrix, RGBMatrixOptions, graphics = get_matrix_backend()
+    RGBMatrix, RGBMatrixOptions, graphics = get_matrix_backend(
+        use_fpp=args.fpp,
+        fpp_host=args.fpp_host,
+        fpp_port=args.fpp_port,
+        use_colorlight=args.colorlight,
+        colorlight_interface=args.colorlight_interface,
+        width=args.cols,
+        height=args.rows,
+    )
 
     options = RGBMatrixOptions()
     options.rows         = args.rows
     options.cols         = args.cols
     options.chain_length = args.chain
     options.parallel     = args.parallel
-    options.gpio_slowdown = 3
+    options.gpio_slowdown = args.gpio_slowdown
 
     matrix = RGBMatrix(options=options)
 
