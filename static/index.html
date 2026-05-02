@@ -166,21 +166,22 @@
           panel.innerHTML = `
             <hr style="margin:12px 0; border-color:#eee;">
             <h3 style="margin:0 0 10px;">AthleticLIVE Settings</h3>
-            <div style="display:grid; gap:10px; max-width:480px;">
-              <label style="font-weight:500;">Computer Name
-                <input id="als-name" type="text" value="${s.name || ''}" class="input"
-                       style="display:block; width:100%; margin-top:4px;"
+            <div style="max-width:480px;">
+              <div class="form-group">
+                <label for="als-name">Computer Name</label>
+                <input id="als-name" type="text" value="${s.name || ''}"
                        placeholder="e.g. FUSHIABOX">
-              </label>
-              <label style="font-weight:500;">UUID
-                <input id="als-uuid" type="text" value="${s.uuid || ''}" class="input"
-                       style="display:block; width:100%; margin-top:4px;"
+              </div>
+              <div class="form-group">
+                <label for="als-uuid">UUID</label>
+                <input id="als-uuid" type="text" value="${s.uuid || ''}"
                        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-              </label>
-              <label style="font-weight:500;">Poll Interval (seconds)
-                <input id="als-interval" type="number" step="0.5" min="1" value="${s.interval || 3}"
-                       class="input" style="display:block; width:120px; margin-top:4px;">
-              </label>
+              </div>
+              <div class="form-group">
+                <label for="als-interval">Poll Interval (seconds)</label>
+                <input id="als-interval" type="number" step="0.5" min="1"
+                       value="${s.interval || 3}" style="width:120px;">
+              </div>
             </div>`;
         } catch (err) {
           panel.innerHTML = `<p style="color:#e74c3c;">Could not load settings: ${err.message}</p>`;
