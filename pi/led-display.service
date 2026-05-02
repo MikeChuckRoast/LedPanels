@@ -1,12 +1,12 @@
 [Unit]
-Description=LED Display Event Service
+Description=LED Display Manager Service
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/home/mike/LedPanels
-ExecStart=/usr/bin/python3 /home/mike/LedPanels/display_event.py
+ExecStart=/usr/bin/python3 /home/mike/LedPanels/display_manager.py --config-dir /home/mike/LedPanels/config
 Restart=always
 RestartSec=10
 StandardOutput=journal

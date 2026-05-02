@@ -30,7 +30,12 @@ class WebServer:
     """Web server for LED display control interface."""
 
     def __init__(self, config_dir: str, host: str = "0.0.0.0", port: int = 5000,
-                 get_display_power=None, set_display_power=None):
+                 get_display_power=None, set_display_power=None,
+                 # Manager callbacks — all optional; 501 returned when absent
+                 get_active_mode=None, set_active_mode=None,
+                 get_mode_status=None,
+                 get_mode_config=None, set_mode_config=None,
+                 available_modes=None):
         """Initialize web server.
 
         Args:
@@ -39,12 +44,25 @@ class WebServer:
             port: Port to listen on
             get_display_power: Callback returning current display power state (bool)
             set_display_power: Callback to set display power state (bool)
+            get_active_mode: () -> str  (manager only)
+            set_active_mode: (mode: str) -> None  (manager only)
+            get_mode_status: () -> dict  (manager only)
+            get_mode_config: (mode: str) -> dict  (manager only)
+            set_mode_config: (mode: str, values: dict) -> None  (manager only)
+            available_modes: dict[str, {"label": str}]  (manager only)
         """
         self.config_dir = Path(config_dir)
         self.host = host
         self.port = port
         self.get_display_power = get_display_power
         self.set_display_power = set_display_power
+        # Manager callbacks
+        self._get_active_mode = get_active_mode
+        self._set_active_mode = set_active_mode
+        self._get_mode_status = get_mode_status
+        self._get_mode_config = get_mode_config
+        self._set_mode_config = set_mode_config
+        self._available_modes = available_modes or {}
         self.app = Flask(__name__,
                         static_folder='static',
                         template_folder='templates')
@@ -125,6 +143,31 @@ class WebServer:
         @self.app.route('/api/display_power', methods=['POST'])
         def set_display_power():
             return self._set_display_power()
+
+        # Manager routes (return 501 when manager callbacks are unavailable)
+        @self.app.route('/api/display_modes', methods=['GET'])
+        def get_display_modes():
+            return self._get_display_modes()
+
+        @self.app.route('/api/active_mode', methods=['GET'])
+        def get_active_mode():
+            return self._get_active_mode_route()
+
+        @self.app.route('/api/active_mode', methods=['POST'])
+        def set_active_mode():
+            return self._set_active_mode_route()
+
+        @self.app.route('/api/mode_status', methods=['GET'])
+        def get_mode_status():
+            return self._get_mode_status_route()
+
+        @self.app.route('/api/mode_settings/<mode>', methods=['GET'])
+        def get_mode_settings(mode):
+            return self._get_mode_settings(mode)
+
+        @self.app.route('/api/mode_settings/<mode>', methods=['POST'])
+        def set_mode_settings(mode):
+            return self._set_mode_settings(mode)
 
     def _get_events(self) -> Tuple[Dict, int]:
         """Get list of events from lynx.evt file.
@@ -778,6 +821,66 @@ class WebServer:
             logging.error(f"Error uploading combined files: {e}")
             return jsonify({'error': str(e)}), 500
 
+    def _get_display_modes(self):
+        if not self._available_modes:
+            return jsonify({'error': 'not running under display_manager'}), 501
+        return jsonify({'modes': self._available_modes}), 200
+
+    def _get_active_mode_route(self):
+        if self._get_active_mode is None:
+            return jsonify({'error': 'not running under display_manager'}), 501
+        return jsonify({'active_mode': self._get_active_mode()}), 200
+
+    def _set_active_mode_route(self):
+        if self._set_active_mode is None:
+            return jsonify({'error': 'not running under display_manager'}), 501
+        data = request.get_json()
+        if not data or 'mode' not in data:
+            return jsonify({'error': 'Missing required field: mode'}), 400
+        mode = data['mode']
+        from config_loader import VALID_MODES
+        if mode not in VALID_MODES:
+            return jsonify({'error': f'Invalid mode. Valid values: {VALID_MODES}'}), 400
+        try:
+            self._set_active_mode(mode)
+        except Exception as exc:
+            logging.error('Error switching mode: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+        return jsonify({'success': True, 'active_mode': mode}), 200
+
+    def _get_mode_status_route(self):
+        if self._get_mode_status is None:
+            return jsonify({'error': 'not running under display_manager'}), 501
+        return jsonify(self._get_mode_status()), 200
+
+    def _get_mode_settings(self, mode: str):
+        if self._get_mode_config is None:
+            return jsonify({'error': 'not running under display_manager'}), 501
+        from config_loader import VALID_MODES
+        if mode not in VALID_MODES:
+            return jsonify({'error': f'Invalid mode. Valid values: {VALID_MODES}'}), 400
+        try:
+            cfg = self._get_mode_config(mode)
+        except Exception as exc:
+            return jsonify({'error': str(exc)}), 500
+        return jsonify({'mode': mode, 'settings': cfg}), 200
+
+    def _set_mode_settings(self, mode: str):
+        if self._set_mode_config is None:
+            return jsonify({'error': 'not running under display_manager'}), 501
+        from config_loader import VALID_MODES
+        if mode not in VALID_MODES:
+            return jsonify({'error': f'Invalid mode. Valid values: {VALID_MODES}'}), 400
+        data = request.get_json()
+        if not data or 'settings' not in data or not isinstance(data['settings'], dict):
+            return jsonify({'error': 'Missing or invalid settings object'}), 400
+        try:
+            self._set_mode_config(mode, data['settings'])
+        except Exception as exc:
+            logging.error('Error saving mode settings: %s', exc)
+            return jsonify({'error': str(exc)}), 500
+        return jsonify({'success': True}), 200
+
     def _get_display_power(self):
         """Get current display power state."""
         if self.get_display_power is None:
@@ -821,7 +924,11 @@ class WebServer:
 
 
 def start_web_server(config_dir: str, host: str = "0.0.0.0", port: int = 5000,
-                     get_display_power=None, set_display_power=None) -> Optional[WebServer]:
+                     get_display_power=None, set_display_power=None,
+                     get_active_mode=None, set_active_mode=None,
+                     get_mode_status=None,
+                     get_mode_config=None, set_mode_config=None,
+                     available_modes=None) -> Optional[WebServer]:
     """Start the web server.
 
     Args:
@@ -830,6 +937,9 @@ def start_web_server(config_dir: str, host: str = "0.0.0.0", port: int = 5000,
         port: Port to listen on
         get_display_power: Callback returning current display power state
         set_display_power: Callback to set display power state
+        get_active_mode / set_active_mode / get_mode_status /
+        get_mode_config / set_mode_config / available_modes:
+            Optional manager callbacks — see WebServer.__init__ docstring.
 
     Returns:
         WebServer instance if started successfully, None otherwise
@@ -837,7 +947,13 @@ def start_web_server(config_dir: str, host: str = "0.0.0.0", port: int = 5000,
     try:
         server = WebServer(config_dir, host, port,
                           get_display_power=get_display_power,
-                          set_display_power=set_display_power)
+                          set_display_power=set_display_power,
+                          get_active_mode=get_active_mode,
+                          set_active_mode=set_active_mode,
+                          get_mode_status=get_mode_status,
+                          get_mode_config=get_mode_config,
+                          set_mode_config=set_mode_config,
+                          available_modes=available_modes)
         server.start()
         return server
     except Exception as e:

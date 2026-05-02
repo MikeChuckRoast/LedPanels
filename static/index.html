@@ -21,35 +21,51 @@
     <div class="container">
       <div id="alert-container"></div>
 
-      <div class="grid">
+      <!-- Display mode selector (only visible when running under display_manager) -->
+      <div id="mode-section" style="display:none">
         <div class="card">
-          <div
-            style="
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-            "
-          >
-            <h2 style="margin: 0">Current Event</h2>
-            <button
-              id="power-toggle"
-              onclick="toggleDisplayPower()"
-              class="power-btn power-on"
-              title="Toggle display power"
-            >
-              Display On
-            </button>
-          </div>
-          <div id="current-event-info">
-            <div class="loading">Loading...</div>
+          <h2>Display Mode</h2>
+          <div id="mode-status-bar" style="margin-bottom:12px; font-size:13px; color:#7f8c8d;">Loading…</div>
+          <div id="mode-radio-group" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px;"></div>
+          <div id="mode-settings-panel"></div>
+          <div style="margin-top:14px;">
+            <button onclick="applyModeSwitch()" class="btn" style="margin-right:8px;">Apply &amp; Switch</button>
+            <span id="mode-switch-status" style="font-size:13px; color:#7f8c8d;"></span>
           </div>
         </div>
       </div>
 
-      <div class="card">
-        <h2>Available Events</h2>
-        <div id="events-list">
-          <div class="loading">Loading events...</div>
+      <div id="event-section">
+        <div class="grid">
+          <div class="card">
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+              "
+            >
+              <h2 style="margin: 0">Current Event</h2>
+              <button
+                id="power-toggle"
+                onclick="toggleDisplayPower()"
+                class="power-btn power-on"
+                title="Toggle display power"
+              >
+                Display On
+              </button>
+            </div>
+            <div id="current-event-info">
+              <div class="loading">Loading...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Available Events</h2>
+          <div id="events-list">
+            <div class="loading">Loading events...</div>
+          </div>
         </div>
       </div>
     </div>
@@ -63,6 +79,153 @@
         }
         return await response.json();
       }
+
+      // ---------- Display Manager / Mode selection ----------
+
+      let _availableModes = null;   // {id: {label}}
+      let _selectedMode = null;     // mode id string currently selected in radio group
+      let _activeMode = null;       // mode id string confirmed running
+
+      async function loadModeSection() {
+        try {
+          const modesData = await fetchAPI('/api/display_modes');
+          _availableModes = modesData.modes;
+          document.getElementById('mode-section').style.display = '';
+        } catch {
+          // Not running under display_manager — hide mode section entirely
+          document.getElementById('mode-section').style.display = 'none';
+          return;
+        }
+
+        // Build radio buttons
+        const group = document.getElementById('mode-radio-group');
+        group.innerHTML = Object.entries(_availableModes).map(([id, meta]) => `
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;
+                         background:#f4f4f8; padding:8px 14px; border-radius:6px;
+                         border:2px solid transparent;" id="mode-label-${id}">
+            <input type="radio" name="display_mode" value="${id}"
+                   onchange="onModeRadioChange('${id}')">
+            ${meta.label}
+          </label>`).join('');
+
+        await refreshModeStatus();
+      }
+
+      async function refreshModeStatus() {
+        try {
+          const [activeData, statusData] = await Promise.all([
+            fetchAPI('/api/active_mode'),
+            fetchAPI('/api/mode_status'),
+          ]);
+          _activeMode = activeData.active_mode;
+
+          // Select the active radio
+          const radio = document.querySelector(`input[name=display_mode][value="${_activeMode}"]`);
+          if (radio) radio.checked = true;
+          if (_selectedMode === null) _selectedMode = _activeMode;
+
+          // Highlight active label
+          Object.keys(_availableModes).forEach(id => {
+            const lbl = document.getElementById(`mode-label-${id}`);
+            if (lbl) lbl.style.borderColor = id === _activeMode ? 'var(--primary-color)' : 'transparent';
+          });
+
+          // Status bar
+          const running = statusData.running;
+          const statusColor = running ? '#27ae60' : '#e74c3c';
+          const statusText = running ? `Running (pid ${statusData.pid})` : `Stopped (exit ${statusData.exit_code})`;
+          document.getElementById('mode-status-bar').innerHTML =
+            `Active mode: <strong>${_availableModes[_activeMode]?.label || _activeMode}</strong> &mdash; ` +
+            `<span style="color:${statusColor}">${statusText}</span>`;
+
+          // Show/hide event section
+          document.getElementById('event-section').style.display =
+            _activeMode === 'display_event' ? '' : 'none';
+
+          // Render settings for currently selected mode
+          renderModeSettings(_selectedMode || _activeMode);
+        } catch (err) {
+          console.warn('Could not refresh mode status:', err);
+        }
+      }
+
+      function onModeRadioChange(id) {
+        _selectedMode = id;
+        renderModeSettings(id);
+      }
+
+      async function renderModeSettings(mode) {
+        const panel = document.getElementById('mode-settings-panel');
+        if (mode !== 'athletic_live_scoreboard') {
+          panel.innerHTML = '';
+          return;
+        }
+        try {
+          const data = await fetchAPI(`/api/mode_settings/${mode}`);
+          const s = data.settings;
+          panel.innerHTML = `
+            <hr style="margin:12px 0; border-color:#eee;">
+            <h3 style="margin:0 0 10px;">AthleticLIVE Settings</h3>
+            <div style="display:grid; gap:10px; max-width:480px;">
+              <label style="font-weight:500;">Computer Name
+                <input id="als-name" type="text" value="${s.name || ''}" class="input"
+                       style="display:block; width:100%; margin-top:4px;"
+                       placeholder="e.g. FUSHIABOX">
+              </label>
+              <label style="font-weight:500;">UUID
+                <input id="als-uuid" type="text" value="${s.uuid || ''}" class="input"
+                       style="display:block; width:100%; margin-top:4px;"
+                       placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+              </label>
+              <label style="font-weight:500;">Poll Interval (seconds)
+                <input id="als-interval" type="number" step="0.5" min="1" value="${s.interval || 3}"
+                       class="input" style="display:block; width:120px; margin-top:4px;">
+              </label>
+            </div>`;
+        } catch (err) {
+          panel.innerHTML = `<p style="color:#e74c3c;">Could not load settings: ${err.message}</p>`;
+        }
+      }
+
+      async function applyModeSwitch() {
+        const mode = _selectedMode || _activeMode;
+        if (!mode) return;
+        const statusEl = document.getElementById('mode-switch-status');
+        statusEl.textContent = 'Saving…';
+
+        // Persist athletic_live settings before switching
+        if (mode === 'athletic_live_scoreboard') {
+          const name = document.getElementById('als-name')?.value.trim();
+          const uuid = document.getElementById('als-uuid')?.value.trim();
+          const interval = parseFloat(document.getElementById('als-interval')?.value);
+          if (!name || !uuid) {
+            showAlert('Name and UUID are required for AthleticLIVE mode.', 'error');
+            statusEl.textContent = '';
+            return;
+          }
+          try {
+            await postAPI(`/api/mode_settings/${mode}`, { settings: { name, uuid, interval } });
+          } catch (err) {
+            showAlert(`Error saving settings: ${err.message}`, 'error');
+            statusEl.textContent = '';
+            return;
+          }
+        }
+
+        try {
+          await postAPI('/api/active_mode', { mode });
+          showAlert(`Switched to: ${_availableModes[mode]?.label || mode}`);
+          statusEl.textContent = '';
+          // Wait briefly for child to start, then refresh status
+          setTimeout(refreshModeStatus, 1500);
+        } catch (err) {
+          showAlert(`Error switching mode: ${err.message}`, 'error');
+          statusEl.textContent = '';
+        }
+      }
+
+      // Auto-refresh mode status every 10 seconds
+      setInterval(() => { if (_availableModes) refreshModeStatus(); }, 10000);
 
       async function postAPI(endpoint, data) {
         const response = await fetch(endpoint, {
@@ -228,6 +391,7 @@
 
       // Initialize on page load
       document.addEventListener("DOMContentLoaded", () => {
+        loadModeSection();
         loadEvents();
         loadDisplayPower();
       });

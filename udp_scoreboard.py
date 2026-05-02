@@ -178,9 +178,15 @@ def format_time(time_str: str) -> str:
 def main():
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
+    # Pre-parse config-dir so settings can be loaded before building the full parser
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument('--config-dir', default='./config')
+    pre_args, _ = pre_parser.parse_known_args()
+    config_dir = pre_args.config_dir
+
     # Try to load settings from config
     try:
-        settings = load_settings('./config')
+        settings = load_settings(config_dir)
         hw = settings.get('hardware', {})
         fonts_cfg = settings.get('fonts', {})
         net = settings.get('network', {})
@@ -199,6 +205,8 @@ def main():
 
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Display scoreboard data from UDP on LED matrix")
+    parser.add_argument('--config-dir', default='./config',
+                       help='Path to configuration directory (default: ./config)')
     parser.add_argument('--port', '-p', type=int,
                        default=scoreboard_cfg.get('udp_port', 5568),
                        help='UDP port to listen on (default: 5568)')

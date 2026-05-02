@@ -388,3 +388,123 @@ def _validate_bool(config: Dict, key: str, section: str) -> None:
     value = config[key]
     if not isinstance(value, bool):
         raise ConfigError(f"'{key}' must be a boolean in [{section}] section (got: {value})")
+
+
+# ---------------------------------------------------------------------------
+# Display Manager config helpers
+# ---------------------------------------------------------------------------
+
+_MANAGER_DEFAULTS = {
+    "active_mode": "display_event",
+    "auto_restart": True,
+    "restart_backoff_sec": 5,
+}
+
+_MODE_DEFAULTS: Dict[str, Dict] = {
+    "display_event": {},
+    "athletic_live_scoreboard": {
+        "name": "",
+        "uuid": "",
+        "interval": 3.0,
+        "font": "fonts/helvB14.bdf",
+    },
+    "udp_scoreboard": {},
+}
+
+VALID_MODES = list(_MODE_DEFAULTS.keys())
+
+
+def load_manager_config(config_dir: str) -> Dict[str, Any]:
+    """Return [manager] section with defaults injected for missing keys.
+
+    Never raises — if settings.toml is unreadable the full defaults are returned.
+    """
+    try:
+        settings_path = Path(config_dir) / "settings.toml"
+        with open(settings_path, "rb") as f:
+            raw = tomllib.load(f)
+        section = raw.get("manager", {})
+    except Exception:
+        section = {}
+
+    result = dict(_MANAGER_DEFAULTS)
+    result.update(section)
+    return result
+
+
+def load_mode_config(config_dir: str, mode: str) -> Dict[str, Any]:
+    """Return flattened config for *mode*, merging defaults with [mode.<mode>] overrides."""
+    if mode not in _MODE_DEFAULTS:
+        raise ConfigError(f"Unknown mode '{mode}'. Valid modes: {VALID_MODES}")
+
+    try:
+        settings_path = Path(config_dir) / "settings.toml"
+        with open(settings_path, "rb") as f:
+            raw = tomllib.load(f)
+        section = (raw.get("mode") or {}).get(mode, {})
+    except Exception:
+        section = {}
+
+    result = dict(_MODE_DEFAULTS[mode])
+    result.update(section)
+    return result
+
+
+def save_mode_config(config_dir: str, mode: str, values: Dict[str, Any]) -> None:
+    """Persist *values* into the [mode.<mode>] section of settings.toml.
+
+    Only keys present in *values* are updated; other keys in that section
+    and all other sections are left intact.
+    """
+    import tomli_w  # optional dep — only needed by manager
+
+    if mode not in _MODE_DEFAULTS:
+        raise ConfigError(f"Unknown mode '{mode}'. Valid modes: {VALID_MODES}")
+
+    settings_path = Path(config_dir) / "settings.toml"
+    try:
+        with open(settings_path, "rb") as f:
+            config = tomllib.load(f)
+    except Exception as e:
+        raise ConfigError(f"Failed to load settings.toml: {e}")
+
+    if "mode" not in config:
+        config["mode"] = {}
+    if mode not in config["mode"]:
+        config["mode"][mode] = {}
+    config["mode"][mode].update(values)
+
+    try:
+        with open(settings_path, "wb") as f:
+            tomli_w.dump(config, f)
+    except Exception as e:
+        raise ConfigError(f"Failed to write settings.toml: {e}")
+
+    logging.info("Saved mode config [mode.%s]: %s", mode, values)
+
+
+def save_active_mode(config_dir: str, mode: str) -> None:
+    """Persist [manager].active_mode to settings.toml."""
+    import tomli_w  # optional dep — only needed by manager
+
+    if mode not in _MODE_DEFAULTS:
+        raise ConfigError(f"Unknown mode '{mode}'. Valid modes: {VALID_MODES}")
+
+    settings_path = Path(config_dir) / "settings.toml"
+    try:
+        with open(settings_path, "rb") as f:
+            config = tomllib.load(f)
+    except Exception as e:
+        raise ConfigError(f"Failed to load settings.toml: {e}")
+
+    if "manager" not in config:
+        config["manager"] = dict(_MANAGER_DEFAULTS)
+    config["manager"]["active_mode"] = mode
+
+    try:
+        with open(settings_path, "wb") as f:
+            tomli_w.dump(config, f)
+    except Exception as e:
+        raise ConfigError(f"Failed to write settings.toml: {e}")
+
+    logging.info("Saved active_mode = %s", mode)

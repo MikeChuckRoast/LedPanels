@@ -991,7 +991,7 @@ def handle_heat_change(request, schedule, current_schedule_index, starting_sched
     return current_event, current_round, current_heat, current_schedule_index
 
 
-def setup_peripherals(settings, config_dir, args_keyboard_device, state):
+def setup_peripherals(settings, config_dir, args_keyboard_device, state, no_web=False):
     """Start background services: web server, file watcher, network monitor, keyboard listener.
 
     Args:
@@ -999,13 +999,14 @@ def setup_peripherals(settings, config_dir, args_keyboard_device, state):
         config_dir: Path to config directory
         args_keyboard_device: Keyboard device path from CLI args (or None)
         state: DisplayState instance
+        no_web: If True, skip starting the web server (used when run under display_manager)
 
     Returns:
         Tuple of (web_server, file_watcher, keyboard_listener)
     """
-    # Start web server if enabled
+    # Start web server if enabled and not suppressed
     web_server = None
-    if settings.get('web', {}).get('web_enabled', False):
+    if not no_web and settings.get('web', {}).get('web_enabled', False):
         web_host = settings.get('web', {}).get('web_host', '0.0.0.0')
         web_port = settings.get('web', {}).get('web_port', 5000)
         web_server = start_web_server(config_dir, web_host, web_port,
@@ -1112,6 +1113,8 @@ def main():
     parser.add_argument('--colorlight', action='store_true', default=net['colorlight_enabled'], help='Send frames directly to ColorLight 5A-75B via raw Ethernet (requires root/sudo)')
     parser.add_argument('--colorlight-interface', default=net['colorlight_interface'], help='Network interface name for ColorLight (e.g., eth0, enp0s3)')
     parser.add_argument('--keyboard-device', default=kbd['device_path'] or None, help='Path to keyboard input device for evdev (e.g., /dev/input/event2). Auto-detect if not specified.')
+    parser.add_argument('--no-web', action='store_true', default=False,
+                        help='Disable internal web server (used when run under display_manager)')
     args = parser.parse_args()
 
     try:
@@ -1128,7 +1131,7 @@ def main():
 
     # Start peripheral services
     web_server, file_watcher, keyboard_listener = setup_peripherals(
-        settings, config_dir, args.keyboard_device, state)
+        settings, config_dir, args.keyboard_device, state, no_web=args.no_web)
 
     # Load schedule file if available
     schedule_path = os.path.join(config_dir, "lynx.sch")
