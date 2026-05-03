@@ -126,6 +126,49 @@ MODES = {
 
 
 # ---------------------------------------------------------------------------
+# Display blanking helper
+# ---------------------------------------------------------------------------
+
+def _blank_display(config_dir: str) -> None:
+    """Send an all-black frame to the configured hardware backend.
+
+    Supports ColorLight and FPP backends.  Raw rgbmatrix is owned by the
+    child process so it cannot be blanked from here; a warning is logged.
+    """
+    try:
+        from config_loader import load_settings
+        settings = load_settings(config_dir)
+        hw = settings.get("hardware", {})
+        net = settings.get("network", {})
+
+        width = hw.get("width", 64) * hw.get("chain", 1)
+        height = hw.get("height", 32) * hw.get("parallel", 1)
+
+        if net.get("colorlight_enabled", False):
+            from colorlight_output import ColorLightMatrix
+            interface = net.get("colorlight_interface", "eth0")
+            matrix = ColorLightMatrix(interface, width, height)
+            matrix.Clear()
+            matrix.SwapOnVSync(matrix)
+            log.info("Display blanked via ColorLight")
+        elif net.get("fpp_enabled", False):
+            from fpp_output import FPPMatrix
+            host = net.get("fpp_host", "127.0.0.1")
+            port = int(net.get("fpp_port", 4048))
+            matrix = FPPMatrix(host, port, width, height)
+            matrix.Clear()
+            matrix.SwapOnVSync(matrix)
+            log.info("Display blanked via FPP")
+        else:
+            log.warning(
+                "No network backend configured; cannot blank rgbmatrix hardware "
+                "from the manager process"
+            )
+    except Exception as exc:
+        log.warning("Could not blank display hardware: %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # ModeProcess — manages a single child process lifecycle
 # ---------------------------------------------------------------------------
 
@@ -224,6 +267,30 @@ class ManagerState:
         self._lock = threading.Lock()
         cfg = load_manager_config(config_dir)
         self._active_mode: str = cfg["active_mode"]
+        self._power_on: bool = True
+
+    # -- display power -------------------------------------------------------
+
+    def get_display_power(self) -> bool:
+        with self._lock:
+            return self._power_on
+
+    def set_display_power(self, state: bool) -> None:
+        """Turn the display on (True) or off (False).
+
+        Power-off stops the child process then blanks the hardware.
+        Power-on restarts the child process for the current active mode.
+        """
+        with self._lock:
+            self._power_on = state
+        if state:
+            mode = self.get_active_mode()
+            log.info("Display power on — starting mode %s", mode)
+            self._proc.start(mode, self._config_dir)
+        else:
+            log.info("Display power off — stopping child process")
+            self._proc.stop()
+            _blank_display(self._config_dir)
 
     # -- mode access ---------------------------------------------------------
 
@@ -308,6 +375,8 @@ def main():
             config_dir,
             web_host,
             web_port,
+            get_display_power=state.get_display_power,
+            set_display_power=state.set_display_power,
             get_active_mode=state.get_active_mode,
             set_active_mode=state.set_active_mode,
             get_mode_status=state.get_mode_status,
@@ -339,13 +408,13 @@ def main():
         if exit_code is not None:
             current_mode = state.get_active_mode()
             log.warning("Mode %s exited with code %s", current_mode, exit_code)
-            if auto_restart and not shutdown_event.is_set():
+            if auto_restart and not shutdown_event.is_set() and state.get_display_power():
                 log.info("Auto-restarting %s in %.0fs…", current_mode, restart_backoff)
                 # Sleep in small increments so SIGTERM wakes us promptly
                 deadline = time.monotonic() + restart_backoff
                 while time.monotonic() < deadline and not shutdown_event.is_set():
                     time.sleep(0.25)
-                if not shutdown_event.is_set():
+                if not shutdown_event.is_set() and state.get_display_power():
                     proc.start(current_mode, config_dir)
         time.sleep(0.5)
 
