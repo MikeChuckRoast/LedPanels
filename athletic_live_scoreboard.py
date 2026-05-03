@@ -541,7 +541,11 @@ def main():
                 data = parse_scoreboard_text(raw, event_name)
                 log.debug("Parsed data: %s", data)
 
-                # Only re-render when something changed
+                # Only re-render when something changed.
+                # Do not cache partial results (no athlete name) as last_data —
+                # otherwise a blank frame can get "stuck" if Firebase data was
+                # incomplete on the first poll and never changes afterward.
+                has_athlete = bool(data.get("first_name") or data.get("last_name"))
                 if data != last_data:
                     log.info(
                         "%s | place %s | %s %s (%s) | %s",
@@ -564,7 +568,7 @@ def main():
                         panel_width,
                         panel_height,
                     )
-                    last_data = data
+                    last_data = data if has_athlete else None
                 else:
                     log.debug("Data unchanged, skipping render")
 
