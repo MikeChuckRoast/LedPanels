@@ -163,6 +163,7 @@ def parse_scoreboard_text(raw: Optional[dict], fallback_event_name: str) -> dict
                 last_name = parts[-1]
 
     result["first_name"] = first_name
+    result["last_name"] = last_name
     result["last_initial"] = (last_name[:1].upper() if last_name else "")
     result["team_name"] = (selected_athlete.get("tn") or "").strip()
 
@@ -215,6 +216,43 @@ def parse_scoreboard_text(raw: Optional[dict], fallback_event_name: str) -> dict
 
 
 # ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+def _ordinal_place(place_str: str) -> str:
+    """Convert a place number string to ordinal form, e.g. '15' -> '15th Place'."""
+    try:
+        n = int(place_str)
+    except (ValueError, TypeError):
+        return place_str
+    if 11 <= (n % 100) <= 13:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix} Place"
+
+
+def _format_mark(mark_str: str) -> str:
+    """Format a field-event mark from '18-05.75' to \"18' 5.75\"\"."""
+    mark_str = mark_str.strip()
+    if not mark_str or mark_str.upper() in ("(STANDING)", "FOUL"):
+        return mark_str
+    if "-" in mark_str:
+        parts = mark_str.split("-", 1)
+        try:
+            feet = int(parts[0])
+            inches_val = float(parts[1])
+            if inches_val == int(inches_val):
+                inches_str = str(int(inches_val))
+            else:
+                inches_str = f"{inches_val:.2f}".rstrip("0")
+            return f"{feet}' {inches_str}\""
+        except (ValueError, IndexError):
+            pass
+    return mark_str
+
+
+# ---------------------------------------------------------------------------
 # LED rendering
 # ---------------------------------------------------------------------------
 
@@ -234,19 +272,19 @@ def render_on_matrix(
     canvas = matrix.CreateFrameCanvas()
     canvas.Clear()
 
-    # Fixed block layout
-    # 0..23   : Event name row (24)
-    # 24..55  : Place + athlete row (32)
-    # 56..79  : Latest attempt/mark row (24)
-    # 80..127 : Marks grid area (48)
-    header_y = 0
-    header_h = 24
-    athlete_y = 24
-    athlete_h = 32
-    latest_y = 56
-    latest_h = 24
-    grid_y = 80
-    grid_h = 48
+    # Fixed block layout (total = 128px)
+    # 0..19   : Event name (20px)  — white bg, black text, centered
+    # 20..43  : Athlete name (24px) — affiliation colors, centered
+    # 44..67  : Team name (24px)   — affiliation colors, centered
+    # 68..87  : Place (20px)       — black bg, white text, centered
+    # 88..107 : Last mark (20px)   — black bg, "Last:" left / mark right
+    # 108..127: Best mark (20px)   — black bg, "Best:" left / mark right
+    event_y = 0;   event_h = 20
+    name_y  = 20;  name_h  = 24
+    team_y  = 44;  team_h  = 24
+    place_y = 68;  place_h = 20
+    last_y  = 88;  last_h  = 20
+    best_y  = 108; best_h  = 20
 
     white = graphics.Color(255, 255, 255)
     black = graphics.Color(0, 0, 0)
@@ -257,87 +295,64 @@ def render_on_matrix(
     team_bg = graphics.Color(bg_rgb[0], bg_rgb[1], bg_rgb[2])
     team_fg = graphics.Color(fg_rgb[0], fg_rgb[1], fg_rgb[2])
 
-    # Header: black background, centered white text
-    fill_rectangle(canvas, graphics, 0, header_y, panel_width - 1, header_y + header_h - 1, black)
-    header_text = truncate_text_to_width(font, data.get("event_name", ""), panel_width - 4)
-    header_w = measure_text_width(font, header_text)
-    header_x = max(0, (panel_width - header_w) // 2)
-    header_baseline = calculate_text_baseline(header_y, header_h, font_metadata, 0)
-    graphics.DrawText(canvas, font, header_x, header_baseline, white, header_text)
+    # Row 1: Event name — white background, black text, centered
+    fill_rectangle(canvas, graphics, 0, event_y, panel_width - 1, event_y + event_h - 1, white)
+    event_text = truncate_text_to_width(font, data.get("event_name", ""), panel_width - 4)
+    event_w = measure_text_width(font, event_text)
+    event_x = max(0, (panel_width - event_w) // 2)
+    event_baseline = calculate_text_baseline(event_y, event_h, font_metadata, 0)
+    graphics.DrawText(canvas, font, event_x, event_baseline, black, event_text)
 
-    # Middle row backgrounds use team colors
-    place_box_w = 32
-    athlete_box_w = panel_width - place_box_w
-    fill_rectangle(canvas, graphics, 0, athlete_y, place_box_w - 1, athlete_y + athlete_h - 1, team_bg)
-    fill_rectangle(canvas, graphics, place_box_w, athlete_y, panel_width - 1, athlete_y + athlete_h - 1, team_bg)
-
-    # Place box text (centered)
-    place_text = str(data.get("place") or "")
-    place_text = truncate_text_to_width(font_best, place_text, place_box_w - 4)
-    place_w = measure_text_width(font_best, place_text)
-    place_x = max(0, (place_box_w - place_w) // 2)
-    place_baseline = calculate_text_baseline(athlete_y, athlete_h, font_best_metadata, 0)
-    graphics.DrawText(canvas, font_best, place_x, place_baseline, team_fg, place_text)
-
-    # Athlete name + team in the 96x32 area (two centered 16px lines)
-    name_line_h = 16
-    team_line_h = 16
+    # Row 2: Athlete full name — affiliation colors, centered
+    fill_rectangle(canvas, graphics, 0, name_y, panel_width - 1, name_y + name_h - 1, team_bg)
     first_name = (data.get("first_name") or "").strip()
-    last_initial = (data.get("last_initial") or "").strip()
-    athlete_name = (f"{first_name} {last_initial}".strip() if first_name else "")
+    last_name  = (data.get("last_name") or "").strip()
+    athlete_name = f"{first_name} {last_name}".strip() if first_name else ""
+    athlete_name = truncate_text_to_width(font, athlete_name, panel_width - 4)
+    athlete_w = measure_text_width(font, athlete_name)
+    athlete_x = max(0, (panel_width - athlete_w) // 2)
+    athlete_baseline = calculate_text_baseline(name_y, name_h, font_metadata, 0)
+    graphics.DrawText(canvas, font, athlete_x, athlete_baseline, team_fg, athlete_name)
 
-    athlete_name = truncate_text_to_width(font, athlete_name, athlete_box_w - 4)
-    athlete_name_w = measure_text_width(font, athlete_name)
-    athlete_name_x = place_box_w + max(0, (athlete_box_w - athlete_name_w) // 2)
-    athlete_name_baseline = calculate_text_baseline(athlete_y, name_line_h, font_metadata, 0)
-    graphics.DrawText(canvas, font, athlete_name_x, athlete_name_baseline, team_fg, athlete_name)
-
-    team_text = truncate_text_to_width(font, team_name, athlete_box_w - 4)
+    # Row 3: Team name — affiliation colors, centered
+    fill_rectangle(canvas, graphics, 0, team_y, panel_width - 1, team_y + team_h - 1, team_bg)
+    team_text = truncate_text_to_width(font, team_name, panel_width - 4)
     team_w = measure_text_width(font, team_text)
-    team_x = place_box_w + max(0, (athlete_box_w - team_w) // 2)
-    team_baseline = calculate_text_baseline(athlete_y + name_line_h, team_line_h, font_metadata, 0)
+    team_x = max(0, (panel_width - team_w) // 2)
+    team_baseline = calculate_text_baseline(team_y, team_h, font_metadata, 0)
     graphics.DrawText(canvas, font, team_x, team_baseline, team_fg, team_text)
 
-    # Latest attempt + mark: white background, centered black text
-    fill_rectangle(canvas, graphics, 0, latest_y, panel_width - 1, latest_y + latest_h - 1, white)
-    latest_text = truncate_text_to_width(font, data.get("latest_attempt_mark", ""), panel_width - 4)
-    latest_w = measure_text_width(font, latest_text)
-    latest_x = max(0, (panel_width - latest_w) // 2)
-    latest_baseline = calculate_text_baseline(latest_y, latest_h, font_metadata, 0)
-    graphics.DrawText(canvas, font, latest_x, latest_baseline, black, latest_text)
+    # Row 4: Place — black background, white text, centered ("15th Place")
+    fill_rectangle(canvas, graphics, 0, place_y, panel_width - 1, place_y + place_h - 1, black)
+    place_raw = str(data.get("place") or "")
+    place_text = _ordinal_place(place_raw) if place_raw else ""
+    place_text = truncate_text_to_width(font, place_text, panel_width - 4)
+    place_w = measure_text_width(font, place_text)
+    place_x = max(0, (panel_width - place_w) // 2)
+    place_baseline = calculate_text_baseline(place_y, place_h, font_metadata, 0)
+    graphics.DrawText(canvas, font, place_x, place_baseline, white, place_text)
 
-    # Best mark display area: black background for label, green for best value
-    label_h = 16
-    value_h = grid_h - label_h
+    # Row 5: Last mark — black bg, "Last:" left-justified, mark right-justified
+    fill_rectangle(canvas, graphics, 0, last_y, panel_width - 1, last_y + last_h - 1, black)
+    last_label = "Last:"
+    last_mark_raw = (data.get("mark") or "").strip()
+    last_mark_text = _format_mark(last_mark_raw) if last_mark_raw else ""
+    last_baseline = calculate_text_baseline(last_y, last_h, font_metadata, 0)
+    graphics.DrawText(canvas, font, 2, last_baseline, white, last_label)
+    if last_mark_text:
+        last_mark_w = measure_text_width(font, last_mark_text)
+        graphics.DrawText(canvas, font, panel_width - last_mark_w - 2, last_baseline, white, last_mark_text)
 
-    fill_rectangle(canvas, graphics, 0, grid_y, panel_width - 1, grid_y + label_h - 1, black)
-
-    # Draw "Best" label (white on black)
-    label_text = "Best"
-    label_w = measure_text_width(font, label_text)
-    label_x = max(0, (panel_width - label_w) // 2)
-    label_baseline = calculate_text_baseline(grid_y, label_h, font_metadata, 0)
-    graphics.DrawText(canvas, font, label_x, label_baseline, white, label_text)
-
-    # Draw best mark value or FOUL message
-    if data.get("all_foul"):
-        # All marks are fouls: red background with white "FOUL" text
-        red = graphics.Color(255, 0, 0)
-        fill_rectangle(canvas, graphics, 0, grid_y + label_h, panel_width - 1, grid_y + grid_h - 1, red)
-        foul_text = "FOUL"
-        foul_w = measure_text_width(font_best, foul_text)
-        foul_x = max(0, (panel_width - foul_w) // 2)
-        foul_baseline = calculate_text_baseline(grid_y + label_h, value_h, font_best_metadata, 0)
-        graphics.DrawText(canvas, font_best, foul_x, foul_baseline, white, foul_text)
-    else:
-        # Green background with best mark value
-        green = graphics.Color(0, 255, 0)
-        fill_rectangle(canvas, graphics, 0, grid_y + label_h, panel_width - 1, grid_y + grid_h - 1, green)
-        best_text = truncate_text_to_width(font_best, data.get("best_mark", ""), panel_width - 4)
-        best_w = measure_text_width(font_best, best_text)
-        best_x = max(0, (panel_width - best_w) // 2)
-        best_baseline = calculate_text_baseline(grid_y + label_h, value_h, font_best_metadata, 0)
-        graphics.DrawText(canvas, font_best, best_x, best_baseline, white, best_text)
+    # Row 6: Best mark — black bg, "Best:" left-justified, mark right-justified
+    fill_rectangle(canvas, graphics, 0, best_y, panel_width - 1, best_y + best_h - 1, black)
+    best_label = "Best:"
+    best_mark_raw = (data.get("best_mark") or "").strip()
+    best_mark_text = _format_mark(best_mark_raw) if best_mark_raw else ""
+    best_baseline = calculate_text_baseline(best_y, best_h, font_metadata, 0)
+    graphics.DrawText(canvas, font, 2, best_baseline, white, best_label)
+    if best_mark_text:
+        best_mark_w = measure_text_width(font, best_mark_text)
+        graphics.DrawText(canvas, font, panel_width - best_mark_w - 2, best_baseline, white, best_mark_text)
 
     matrix.SwapOnVSync(canvas)
 
