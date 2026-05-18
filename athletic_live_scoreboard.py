@@ -37,7 +37,8 @@ import requests
 
 from display_utils import (calculate_text_baseline, fill_rectangle,
                            load_font_metadata, load_font_with_fallback,
-                           measure_text_width, truncate_text_to_width)
+                           measure_text_width, truncate_text_to_width,
+                           wrap_text_lines)
 from event_parser import load_affiliation_colors, resolve_affiliation_colors
 from matrix_backend import get_matrix_backend
 
@@ -357,6 +358,50 @@ def render_on_matrix(
     matrix.SwapOnVSync(canvas)
 
 
+def render_standby(
+    matrix,
+    graphics,
+    font,
+    font_metadata: dict,
+    event_name: str,
+    panel_width: int,
+    panel_height: int,
+):
+    """Render a standby screen showing the event name and a waiting message."""
+    canvas = matrix.CreateFrameCanvas()
+    canvas.Clear()
+
+    white  = graphics.Color(255, 255, 255)
+    black  = graphics.Color(0, 0, 0)
+    dark   = graphics.Color(30, 30, 30)
+
+    event_h = 20
+
+    # Row 1: event name — white background, black text, centered
+    fill_rectangle(canvas, graphics, 0, 0, panel_width - 1, event_h - 1, white)
+    evt_text = truncate_text_to_width(font, event_name, panel_width - 4)
+    evt_w = measure_text_width(font, evt_text)
+    evt_x = max(0, (panel_width - evt_w) // 2)
+    evt_baseline = calculate_text_baseline(0, event_h, font_metadata, 0)
+    graphics.DrawText(canvas, font, evt_x, evt_baseline, black, evt_text)
+
+    # Remaining area: dark background with word-wrapped, centered message
+    body_y = event_h
+    body_h = panel_height - event_h
+    fill_rectangle(canvas, graphics, 0, body_y, panel_width - 1, panel_height - 1, dark)
+    lines = wrap_text_lines(font, "Waiting for results...", panel_width - 4)
+    line_h = font_metadata.get("font_ascent", 14) + 2
+    total_h = len(lines) * line_h
+    start_y = body_y + max(0, (body_h - total_h) // 2)
+    for i, line in enumerate(lines):
+        line_w = measure_text_width(font, line)
+        line_x = max(0, (panel_width - line_w) // 2)
+        baseline = calculate_text_baseline(start_y + i * line_h, line_h, font_metadata, 0)
+        graphics.DrawText(canvas, font, line_x, baseline, white, line)
+
+    matrix.SwapOnVSync(canvas)
+
+
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
@@ -547,28 +592,41 @@ def main():
                 # incomplete on the first poll and never changes afterward.
                 has_athlete = bool(data.get("first_name") or data.get("last_name"))
                 if data != last_data:
-                    log.info(
-                        "%s | place %s | %s %s (%s) | %s",
-                        data["event_name"],
-                        data["place"],
-                        data["first_name"],
-                        data["last_initial"],
-                        data["team_name"],
-                        data["latest_attempt_mark"],
-                    )
-                    render_on_matrix(
-                        matrix,
-                        graphics,
-                        font,
-                        font_metadata,
-                        font_best,
-                        font_best_metadata,
-                        data,
-                        team_colors,
-                        panel_width,
-                        panel_height,
-                    )
-                    last_data = data if has_athlete else None
+                    if has_athlete:
+                        log.info(
+                            "%s | place %s | %s %s (%s) | %s",
+                            data["event_name"],
+                            data["place"],
+                            data["first_name"],
+                            data["last_initial"],
+                            data["team_name"],
+                            data["latest_attempt_mark"],
+                        )
+                        render_on_matrix(
+                            matrix,
+                            graphics,
+                            font,
+                            font_metadata,
+                            font_best,
+                            font_best_metadata,
+                            data,
+                            team_colors,
+                            panel_width,
+                            panel_height,
+                        )
+                        last_data = data
+                    else:
+                        log.info("%s | no athlete data — showing standby", data["event_name"])
+                        render_standby(
+                            matrix,
+                            graphics,
+                            font,
+                            font_metadata,
+                            data["event_name"],
+                            panel_width,
+                            panel_height,
+                        )
+                        last_data = None  # re-render each poll until athlete data arrives
                 else:
                     log.debug("Data unchanged, skipping render")
 
