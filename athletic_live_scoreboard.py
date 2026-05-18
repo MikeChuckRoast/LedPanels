@@ -431,8 +431,8 @@ def main():
         help="Scoreboard UUID from the URL"
     )
     parser.add_argument(
-        "--interval", type=float, default=3.0,
-        help="Poll interval in seconds (default: 3)"
+        "--interval", type=float, default=5.0,
+        help="Poll interval in seconds (default: 5)"
     )
     parser.add_argument(
         "--rows",    type=int, default=32,  help="LED panel rows (default: 32)"
@@ -564,6 +564,8 @@ def main():
     last_data = None
     last_board_check = 0
     consecutive_errors = 0
+    sleep_interval = args.interval
+    MAX_BACKOFF = 60.0
     log.info("Polling Firebase every %.1fs …  (Ctrl-C to stop)", args.interval)
 
     try:
@@ -603,6 +605,7 @@ def main():
                     log.info("API reachable again after %d error(s)", consecutive_errors)
                 consecutive_errors = 0
                 net_ok = True
+                sleep_interval = args.interval
 
                 # Only re-render when something changed.
                 # Do not cache partial results (no athlete name) as last_data —
@@ -653,7 +656,24 @@ def main():
             except requests.RequestException as exc:
                 consecutive_errors += 1
                 net_ok = False
-                log.warning("Network error (#%d): %s", consecutive_errors, exc)
+                # Check for 429 Rate Limited — honour Retry-After if provided
+                retry_after = None
+                response = getattr(exc, "response", None)
+                if response is not None and response.status_code == 429:
+                    retry_after_raw = response.headers.get("Retry-After")
+                    if retry_after_raw:
+                        try:
+                            retry_after = float(retry_after_raw)
+                        except ValueError:
+                            pass
+                    if retry_after is None:
+                        retry_after = min(MAX_BACKOFF, args.interval * (2 ** min(consecutive_errors, 6)))
+                    sleep_interval = retry_after
+                    log.warning("Rate limited (429) — backing off for %.0fs", sleep_interval)
+                else:
+                    sleep_interval = min(MAX_BACKOFF, args.interval * (2 ** min(consecutive_errors - 1, 6)))
+                    log.warning("Network error (#%d, retry in %.0fs): %s",
+                                consecutive_errors, sleep_interval, exc)
                 # Re-render last known state with red indicator
                 if last_data:
                     render_on_matrix(matrix, graphics, font, font_metadata,
@@ -665,7 +685,9 @@ def main():
             except Exception as exc:
                 consecutive_errors += 1
                 net_ok = False
-                log.exception("Unexpected error (#%d): %s", consecutive_errors, exc)
+                sleep_interval = min(MAX_BACKOFF, args.interval * (2 ** min(consecutive_errors - 1, 6)))
+                log.exception("Unexpected error (#%d, retry in %.0fs): %s",
+                              consecutive_errors, sleep_interval, exc)
                 if last_data:
                     render_on_matrix(matrix, graphics, font, font_metadata,
                                      font_best, font_best_metadata, last_data,
@@ -674,7 +696,7 @@ def main():
                     render_standby(matrix, graphics, font, font_metadata,
                                    event_name, panel_width, panel_height, net_ok=False)
 
-            time.sleep(args.interval)
+            time.sleep(sleep_interval)
 
     except KeyboardInterrupt:
         log.info("Stopped.")
