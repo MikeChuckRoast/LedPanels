@@ -268,6 +268,7 @@ def render_on_matrix(
     team_colors: dict,
     panel_width: int,
     panel_height: int,
+    net_ok: bool = True,
 ):
     """Render a fixed 128x128 scoreboard layout."""
     canvas = matrix.CreateFrameCanvas()
@@ -355,6 +356,11 @@ def render_on_matrix(
         best_mark_w = measure_text_width(font, best_mark_text)
         graphics.DrawText(canvas, font, panel_width - best_mark_w - 2, best_baseline, white, best_mark_text)
 
+    # Red bottom row when API is unreachable
+    if not net_ok:
+        red = graphics.Color(255, 0, 0)
+        fill_rectangle(canvas, graphics, 0, panel_height - 1, panel_width - 1, panel_height - 1, red)
+
     matrix.SwapOnVSync(canvas)
 
 
@@ -366,6 +372,7 @@ def render_standby(
     event_name: str,
     panel_width: int,
     panel_height: int,
+    net_ok: bool = True,
 ):
     """Render a standby screen showing the event name and a waiting message."""
     canvas = matrix.CreateFrameCanvas()
@@ -398,6 +405,11 @@ def render_standby(
         line_x = max(0, (panel_width - line_w) // 2)
         baseline = calculate_text_baseline(start_y + i * line_h, line_h, font_metadata, 0)
         graphics.DrawText(canvas, font, line_x, baseline, white, line)
+
+    # Red bottom row when API is unreachable
+    if not net_ok:
+        red = graphics.Color(255, 0, 0)
+        fill_rectangle(canvas, graphics, 0, panel_height - 1, panel_width - 1, panel_height - 1, red)
 
     matrix.SwapOnVSync(canvas)
 
@@ -551,6 +563,7 @@ def main():
     # -- Poll loop --------------------------------------------------------
     last_data = None
     last_board_check = 0
+    consecutive_errors = 0
     log.info("Polling Firebase every %.1fs …  (Ctrl-C to stop)", args.interval)
 
     try:
@@ -586,6 +599,11 @@ def main():
                 data = parse_scoreboard_text(raw, event_name)
                 log.debug("Parsed data: %s", data)
 
+                if consecutive_errors > 0:
+                    log.info("API reachable again after %d error(s)", consecutive_errors)
+                consecutive_errors = 0
+                net_ok = True
+
                 # Only re-render when something changed.
                 # Do not cache partial results (no athlete name) as last_data —
                 # otherwise a blank frame can get "stuck" if Firebase data was
@@ -613,6 +631,7 @@ def main():
                             team_colors,
                             panel_width,
                             panel_height,
+                            net_ok=net_ok,
                         )
                         last_data = data
                     else:
@@ -625,15 +644,35 @@ def main():
                             data["event_name"],
                             panel_width,
                             panel_height,
+                            net_ok=net_ok,
                         )
                         last_data = None  # re-render each poll until athlete data arrives
                 else:
                     log.debug("Data unchanged, skipping render")
 
             except requests.RequestException as exc:
-                log.warning("Network error: %s", exc)
+                consecutive_errors += 1
+                net_ok = False
+                log.warning("Network error (#%d): %s", consecutive_errors, exc)
+                # Re-render last known state with red indicator
+                if last_data:
+                    render_on_matrix(matrix, graphics, font, font_metadata,
+                                     font_best, font_best_metadata, last_data,
+                                     team_colors, panel_width, panel_height, net_ok=False)
+                else:
+                    render_standby(matrix, graphics, font, font_metadata,
+                                   event_name, panel_width, panel_height, net_ok=False)
             except Exception as exc:
-                log.exception("Unexpected error: %s", exc)
+                consecutive_errors += 1
+                net_ok = False
+                log.exception("Unexpected error (#%d): %s", consecutive_errors, exc)
+                if last_data:
+                    render_on_matrix(matrix, graphics, font, font_metadata,
+                                     font_best, font_best_metadata, last_data,
+                                     team_colors, panel_width, panel_height, net_ok=False)
+                else:
+                    render_standby(matrix, graphics, font, font_metadata,
+                                   event_name, panel_width, panel_height, net_ok=False)
 
             time.sleep(args.interval)
 
