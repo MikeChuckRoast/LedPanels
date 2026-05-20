@@ -560,6 +560,22 @@ def main():
             panel_height,
         )
 
+    # -- Initial render before polling starts
+    try:
+        log.info("Rendering startup screen...")
+        render_standby(
+            matrix,
+            graphics,
+            font,
+            font_metadata,
+            event_name,
+            panel_width,
+            panel_height,
+            net_ok=False,  # Red indicator since we haven't fetched data yet
+        )
+    except Exception as exc:
+        log.warning("Could not render startup screen: %s", exc)
+
     # -- Poll loop --------------------------------------------------------
     last_data = None
     last_board_check = 0
@@ -571,29 +587,49 @@ def main():
     try:
         while True:
             try:
-                # Every 30 seconds, re-check the board state to detect event changes
+                # Every 30 seconds, re-check board config/state to detect event changes
                 now = time.time()
                 if now - last_board_check > 30:
-                    log.debug("Re-checking board state for event changes...")
+                    log.debug("Re-checking board config/state for event changes...")
                     try:
+                        # documentId/documentValue are sourced from board config API.
+                        # Firebase board state primarily provides meetId.
+                        new_config = fetch_board_config(args.name, args.uuid)
+                        log.debug("Board config keys: %s", list(new_config.keys()) if isinstance(new_config, dict) else type(new_config))
+                        new_event_id = new_config.get("documentId")
+                        new_event_name = new_config.get("documentValue", "")
+                        log.debug("Board config documentId=%r documentValue=%r (current event_id=%r)",
+                                  new_event_id, new_event_name, event_id)
+
+                        # Refresh meetId as well in case the board switched meets.
                         new_board_state = fetch_board_state(args.name, args.uuid)
-                        new_event_id = new_board_state.get("documentId")
+                        log.debug("Board state full: %s", new_board_state)
+                        new_meet_id = new_board_state.get("meetId")
+                        log.debug("Board state meetId=%r (current meet_id=%r)", new_meet_id, meet_id)
+
+                        # Board state may carry a more up-to-date documentId than config API
+                        board_state_event_id = new_board_state.get("documentId")
+                        if board_state_event_id and board_state_event_id != new_event_id:
+                            log.info("Board state documentId=%r overrides config documentId=%r",
+                                     board_state_event_id, new_event_id)
+                            new_event_id = board_state_event_id
+                            new_event_name = new_board_state.get("documentValue", new_event_name)
+                        if new_meet_id and new_meet_id != meet_id:
+                            log.info("Meet changed: %s -> %s", meet_id, new_meet_id)
+                            meet_id = new_meet_id
 
                         if new_event_id and new_event_id != event_id:
-                            log.info("Event changed: %s to %s, re-fetching config…", event_id, new_event_id)
-                            # Re-fetch config to get the new event name (documentValue)
-                            config = fetch_board_config(args.name, args.uuid)
-                            new_event_name = config.get("documentValue", "")
-
                             log.info("Event changed: %s (%s) → %s (%s)",
                                      event_id, event_name, new_event_id, new_event_name)
                             event_id = new_event_id
                             event_name = new_event_name
                             last_data = None  # Force a re-render with new event
-                    except Exception as exc:
-                        log.warning("Could not re-check board state: %s", exc)
 
-                    last_board_check = now
+                        # Only reset the timer if the check succeeded
+                        last_board_check = now
+                    except Exception as exc:
+                        log.warning("Could not re-check board state (will retry): %s", exc)
+                        # Do NOT update last_board_check — retry sooner on next iteration
 
                 log.debug("Fetching live field data for meet_id=%s event_id=%s", meet_id, event_id)
                 raw = fetch_live_field_data(meet_id, event_id)
