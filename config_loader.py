@@ -202,11 +202,12 @@ def load_settings(config_dir: str) -> Dict[str, Any]:
 
     # Validate file existence (resolve relative to config_dir)
     config_path = Path(config_dir)
-    lynx_path = config_path / files["lynx_file"]
     colors_path = config_path / files["colors_file"]
 
-    if not lynx_path.exists():
-        raise ConfigError(f"Lynx event file not found: {lynx_path}")
+    # Note: lynx_file existence is not validated here — it is only required
+    # at runtime by display_event.py, not by modes that don't use it
+    # (e.g. athletic_live_scoreboard). Checking it here causes load_settings
+    # to throw even in modes where lynx.evt is irrelevant.
     if not colors_path.exists():
         raise ConfigError(f"Colors file not found: {colors_path}")
 
