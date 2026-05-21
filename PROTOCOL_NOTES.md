@@ -88,9 +88,20 @@ frame += pixel_data                                # BGR data
 
 4. **Initialization Frames**:
    - Initialization frames must be sent AFTER all row data in every frame update
-   - They act as a "commit" or "display" signal to show the new frame
-   - Sending init frames before data causes a flash of old content
+   - They act as a "commit" or "latch" signal that atomically swaps the write
+     buffer to the display — the swap only occurs after all rows are received
+   - Sending init frames BEFORE data causes the hardware scan to race with
+     incoming pixels, producing visible partial frame renders
    - Send all row data first, then send init frames at the end of `SwapOnVSync`
+
+5. **Cold-Boot Priming**:
+   - On a cold (freshly powered) board the hardware scan chain must complete
+     several full write+latch cycles before it stabilises
+   - Empirically, this hardware silently discards the first 6 complete frames
+   - Fix: send 6 blank (all-black) data+latch cycles in `__init__` before any
+     real content is drawn (~900ms overhead, invisible in practice)
+   - Without priming, the first N real frames are silently discarded and the
+     display appears blank until the hardware warms up
 
 ## Pixel Format
 
@@ -106,9 +117,11 @@ canvas.SetPixel(x, y, red, green, blue)
 
 ## Timing
 
-- **Init frame delay**: 1ms between the two init frames
-- **Init frames are sent**: After all row data in every frame update (at end of SwapOnVSync)
-- **Data frame delay**: 1ms between rows (can be reduced to 0.1ms)
+- **Init frame delay**: 1ms between the two init frames, 1ms after the second before next operation
+- **Init frames are sent**: After all row data in every frame update (end of `SwapOnVSync`)
+- **Data frame delay**: 1ms between rows
+- **Cold-boot priming**: 50ms socket settle pause, then 6 blank frames (~900ms total) sent in `__init__`
+- **Frame send time**: ~143ms per frame for a 128-row panel (128 rows × 1ms + init overhead)
 - **Frame updates**: Only send when content changes (card buffers frames)
 
 ## Working Code Example
@@ -116,7 +129,7 @@ canvas.SetPixel(x, y, red, green, blue)
 ```python
 from colorlight_output import ColorLightMatrix
 
-# Initialize
+# Initialize — automatically sends 6 blank prime frames for cold-boot (~900ms)
 matrix = ColorLightMatrix('eth0', 128, 64)
 
 # Draw pixels
@@ -131,7 +144,7 @@ matrix.SwapOnVSync(matrix)
 # while True:
 #     # Update pixels...
 #     matrix.SwapOnVSync(matrix)
-#     time.sleep(0.05)  # Update rate as needed
+#     # Note: each SwapOnVSync takes ~143ms for a 128-row panel
 ```
 
 ## Font Rendering
@@ -154,12 +167,18 @@ Key font metrics:
 ### Display shows artifacts or flickers
 - Check pixel_count is actual pixel count, not width/3
 - Verify BGR color order
-- Check that data frames follow immediately after init frames
+- Ensure init frames are sent AFTER data, not before
 
 ### No display output
 - Verify interface is UP: `ip link show eth0`
 - Check permissions: Must run with sudo
-- Confirm initialization frames sent before data
+- If blank only on cold boot, cold-boot priming count may be insufficient
+  (increase the prime loop count in `ColorLightMatrix.__init__`)
+
+### Board stuck on previous frame after content change
+- Ensure init frames are sent AFTER data rows in `SwapOnVSync`, not before
+- Init before data interrupts the in-progress scan and causes the hardware
+  to ignore the new data and keep displaying the previously latched frame
 
 ### Text rendering issues
 - Ensure BDF font file exists and is readable

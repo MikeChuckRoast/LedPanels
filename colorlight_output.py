@@ -103,6 +103,25 @@ class ColorLightMatrix:
 
         logging.info("ColorLight 5A-75B initialized on %s: %dx%d", interface, width, height)
 
+        # Cold-boot priming: send 6 complete blank frames (all-black data + latch).
+        #
+        # The ColorLight double-buffers internally: incoming data fills the write
+        # buffer; init frames latch the write buffer to the display. On a cold
+        # board the hardware scan chain needs several complete write+latch cycles
+        # before it stabilises — empirically, this hardware requires exactly 6
+        # before the first real SwapOnVSync renders correctly. Fewer primes cause
+        # the first N real frames to be silently discarded.
+        import time as _time
+        _time.sleep(0.05)  # Brief pause for socket/NIC to fully open
+        blank_row = b'\x00' * (self.width * 3)
+        for _ in range(6):
+            for row_num in range(self.height):
+                frame = self._build_data_frame(row_num, blank_row, offset=0)
+                self.sock.send(frame)
+                _time.sleep(0.001)
+            self._send_init_frames()
+        logging.debug("ColorLight cold-boot priming complete (6 blank frames sent)")
+
     def _send_init_frames(self):
         """Send the two initialization frames required by ColorLight 5A-75B."""
         import time
@@ -120,7 +139,7 @@ class ColorLightMatrix:
             sent1 = self.sock.send(first_frame)
             time.sleep(0.001)  # Small delay between init frames
             sent2 = self.sock.send(second_frame)
-            # No delay before data - send immediately to prevent flash of old content
+            time.sleep(0.001)  # Small delay before data frames begin
             logging.debug("Sent ColorLight init frames: frame1=%d bytes, frame2=%d bytes", sent1, sent2)
         except Exception as e:
             logging.error("Failed to send initialization frames: %s", e)
@@ -189,7 +208,13 @@ class ColorLightMatrix:
             # Use the canvas buffer (should be self, but be explicit)
             buffer_to_send = canvas.buffer if hasattr(canvas, 'buffer') else self.buffer
 
-            # Send each row sequentially FIRST
+            # Protocol: fill write buffer with data rows first, then send init
+            # frames to atomically latch the buffer to the display. This prevents
+            # partial frames — the hardware swap only occurs after all rows are
+            # received. (init BEFORE data causes the scan to race with incoming
+            # pixels, producing visible partial frames on cold hardware.)
+
+            # Send each row sequentially
             for row_num in range(self.height):
                 if NUMPY_AVAILABLE:
                     row_data = bytes(buffer_to_send[row_num].flatten().tolist())
@@ -210,7 +235,7 @@ class ColorLightMatrix:
                 if row_num < 3:
                     logging.debug(f"Row {row_num}: sent {sent} bytes, pixel_count={len(row_data)//3}")
 
-            # Send init frames AFTER all data to commit/display the new frame
+            # Latch the completed frame to the display
             self._send_init_frames()
 
             logging.debug("ColorLight frame sent: %d data frames, %d total bytes", frame_count, bytes_sent)
