@@ -1,0 +1,9 @@
+# Normalize all text files to LF in the repository.
+# This prevents CRLF vs LF noise in diffs when editing on Windows.
+* text=auto eol=lf
+
+# Explicitly binary files — no line ending conversion
+*.png binary
+*.jpg binary
+*.bdf binary
+*.csv text eol=lf
