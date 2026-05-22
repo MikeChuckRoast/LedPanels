@@ -97,7 +97,7 @@ def resolve_affiliation_colors(
     Returns:
         (bg_rgb, text_rgb, display_name)
     """
-    default_bg = (0, 0, 0)
+    default_bg = (40, 40, 40)
     default_text = (255, 255, 255)
 
     if not colors:
