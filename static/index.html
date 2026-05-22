@@ -57,8 +57,7 @@
               margin-bottom: 16px;
             "
           ></div>
-          <div id="mode-settings-panel"></div>
-          <div style="margin-top: 14px">
+          <div style="margin-top: 14px; margin-bottom: 4px">
             <button
               onclick="applyModeSwitch()"
               class="btn"
@@ -71,6 +70,7 @@
               style="font-size: 13px; color: #7f8c8d"
             ></span>
           </div>
+          <div id="mode-settings-panel"></div>
         </div>
       </div>
 
@@ -209,6 +209,8 @@
           panel.innerHTML = "";
           return;
         }
+        // Don't overwrite existing inputs — they may contain unsaved edits
+        if (document.getElementById("als-name")) return;
         try {
           const data = await fetchAPI(`/api/mode_settings/${mode}`);
           const s = data.settings;
@@ -231,10 +233,103 @@
                 <input id="als-interval" type="number" step="0.5" min="1"
                        value="${s.interval || 3}" style="width:120px;">
               </div>
+              <div style="margin-top:10px;">
+                <button onclick="saveAlsSettings()" class="btn btn-secondary" style="margin-right:8px;">Save Settings</button>
+                <button onclick="setAlsFromUrl()" class="btn btn-secondary" style="margin-right:8px;">Set from URL</button>
+                <span id="als-save-status" style="font-size:13px; color:#7f8c8d;"></span>
+              </div>
+            </div>
+            <hr style="margin:12px 0; border-color:#eee;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <h4 style="margin:0; font-size:13px; color:#7f8c8d; text-transform:uppercase; letter-spacing:.05em;">Board Config (live)</h4>
+              <button onclick="refreshBoardConfig()" style="font-size:12px; padding:3px 10px;">Refresh</button>
+            </div>
+            <div id="als-board-config" style="max-width:480px; font-size:13px; color:#555;">
+              <em>Loading…</em>
             </div>`;
+          refreshBoardConfig();
         } catch (err) {
           panel.innerHTML = `<p style="color:#e74c3c;">Could not load settings: ${err.message}</p>`;
         }
+      }
+
+      function setAlsFromUrl() {
+        const raw = prompt("Paste the AthleticLIVE scoreboard URL:");
+        if (!raw) return;
+        let params;
+        try {
+          params = new URL(raw).searchParams;
+        } catch {
+          showAlert("Invalid URL.", "error");
+          return;
+        }
+        const name = params.get("name");
+        const uuid = params.get("uuid");
+        if (!name || !uuid) {
+          showAlert(
+            "Could not find name and uuid parameters in that URL.",
+            "error",
+          );
+          return;
+        }
+        document.getElementById("als-name").value = name;
+        document.getElementById("als-uuid").value = uuid;
+        document.getElementById("als-save-status").textContent =
+          "Fields updated — click Save Settings to persist.";
+        setTimeout(() => {
+          const el = document.getElementById("als-save-status");
+          if (el) el.textContent = "";
+        }, 5000);
+      }
+
+      async function saveAlsSettings() {
+        const name = document.getElementById("als-name")?.value.trim();
+        const uuid = document.getElementById("als-uuid")?.value.trim();
+        const interval = parseFloat(
+          document.getElementById("als-interval")?.value,
+        );
+        const statusEl = document.getElementById("als-save-status");
+        if (!name || !uuid) {
+          showAlert("Name and UUID are required.", "error");
+          return;
+        }
+        statusEl.textContent = "Saving…";
+        try {
+          await postAPI("/api/mode_settings/athletic_live_scoreboard", {
+            settings: { name, uuid, interval },
+          });
+          statusEl.textContent = "Saved";
+          setTimeout(() => {
+            statusEl.textContent = "";
+          }, 3000);
+        } catch (err) {
+          showAlert(`Error saving settings: ${err.message}`, "error");
+          statusEl.textContent = "";
+        }
+      }
+
+      async function refreshBoardConfig() {
+        const el = document.getElementById("als-board-config");
+        if (!el) return;
+        try {
+          const d = await fetchAPI("/api/athletic_live/board_config");
+          el.innerHTML = `
+            <table style="border-collapse:collapse; width:100%;">
+              <tr><td style="padding:4px 8px 4px 0; color:#7f8c8d; white-space:nowrap;">Scoreboard Name</td><td style="padding:4px 0;">${escapeHtml(d.name || "—")}</td></tr>
+              <tr><td style="padding:4px 8px 4px 0; color:#7f8c8d; white-space:nowrap;">Source Data</td><td style="padding:4px 0;">${escapeHtml(d.documentValue || "—")}</td></tr>
+              <tr><td style="padding:4px 8px 4px 0; color:#7f8c8d; white-space:nowrap;">Event ID</td><td style="padding:4px 0;">${escapeHtml(d.documentId || "—")}</td></tr>
+            </table>`;
+        } catch (err) {
+          el.innerHTML = `<span style="color:#e74c3c;">Error: ${escapeHtml(err.message)}</span>`;
+        }
+      }
+
+      function escapeHtml(str) {
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
       }
 
       async function applyModeSwitch() {

@@ -169,6 +169,33 @@ class WebServer:
         def set_mode_settings(mode):
             return self._set_mode_settings(mode)
 
+        @self.app.route('/api/athletic_live/board_config', methods=['GET'])
+        def get_athletic_live_board_config():
+            return self._get_athletic_live_board_config()
+
+    def _get_athletic_live_board_config(self):
+        """Fetch live board config from the AthleticLIVE API."""
+        if self._get_mode_config is None:
+            return jsonify({'error': 'not running under display_manager'}), 501
+        try:
+            cfg = self._get_mode_config('athletic_live_scoreboard')
+        except Exception as exc:
+            return jsonify({'error': str(exc)}), 500
+        name = cfg.get('name', '').strip()
+        uuid = cfg.get('uuid', '').strip()
+        if not name or not uuid:
+            return jsonify({'error': 'name and uuid not configured'}), 400
+        try:
+            from athletic_live_scoreboard import fetch_board_config
+            data = fetch_board_config(name, uuid)
+        except Exception as exc:
+            return jsonify({'error': str(exc)}), 502
+        return jsonify({
+            'name': data.get('name', ''),
+            'documentValue': data.get('documentValue', ''),
+            'documentId': data.get('documentId', ''),
+        }), 200
+
     def _get_events(self) -> Tuple[Dict, int]:
         """Get list of events from lynx.evt file.
 
