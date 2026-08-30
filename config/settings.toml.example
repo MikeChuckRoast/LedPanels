@@ -18,13 +18,13 @@ interval = 2.0                # Seconds per page when paging through athletes
 font_shift = 0                # Font positioning adjustment (vertical offset in pixels)
 
 [fonts]
-# Font configuration
-# font_path: Directory containing BDF font files (use absolute path)
-# font_name: Font filename (can be changed via web UI)
+# font_path: absolute path to the fonts/ directory in this repo
+# font_name: font filename (can be changed via web UI)
+# Bundled fonts: helvB14.bdf, helvB18.bdf, helvB24.bdf, Roboto-Black-50.bdf
 # Examples:
-#   Windows: font_path = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf"
-#   Linux:   font_path = "/home/mike/u8g2/tools/font/bdf"
-font_path = "/Users/mike/Documents/Code Projects/LED Panels/fonts"
+#   Windows: font_path = "C:/Users/mike/Documents/Code Projects/LED Panels/fonts"
+#   Linux:   font_path = "/home/mike/LedPanels/fonts"
+font_path = "C:/Users/mike/Documents/Code Projects/LED Panels/fonts"
 font_name = "helvB14.bdf"
 
 [files]
@@ -95,3 +95,26 @@ height = 32                  # Base panel height in pixels
 chain = 3                    # Panels chained horizontally (3 wide)
 parallel = 2                 # Panels stacked vertically (2 tall)
 gpio_slowdown = 4            # GPIO slowdown for RGBMatrixOptions
+
+[manager]
+# display_manager.py — the process the systemd service starts. It hosts the
+# web UI and runs one display mode as a child process, restarting it on crash.
+active_mode = "display_event"   # display_event | athletic_live_scoreboard | udp_scoreboard
+auto_restart = true             # Restart the display mode if it exits
+restart_backoff_sec = 5         # Seconds to wait before restarting
+
+# Per-mode settings. display_event and udp_scoreboard read the sections above
+# ([display], [hardware], [scoreboard]) and need nothing here; their empty
+# sections are kept so the full set of modes is visible.
+[mode.display_event]
+
+[mode.athletic_live_scoreboard]
+# Both values are required before this mode can start, and come from the
+# scoreboard URL: https://sb.athletic.live/...?name=FUSHIABOX&uuid=dc4113ed-...
+# They can also be set from the web UI.
+name = ""                       # Scoreboard computer name
+uuid = ""                       # Scoreboard UUID
+interval = 3.0                  # Poll interval in seconds
+font = "fonts/helvB14.bdf"      # BDF font
+
+[mode.udp_scoreboard]

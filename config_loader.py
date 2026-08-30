@@ -50,7 +50,10 @@ def ensure_config_directory(config_dir: str) -> None:
     # Create default settings.toml if it doesn't exist
     settings_path = config_path / "settings.toml"
     if not settings_path.exists():
-        default_settings = """# LED Panels Display Configuration
+        # Point at the fonts/ directory shipped alongside this module rather than
+        # a hard-coded path, so a first run works wherever the repo is checked out.
+        bundled_fonts = (Path(__file__).resolve().parent / "fonts").as_posix()
+        default_settings = f"""# LED Panels Display Configuration
 
 [hardware]
 # Physical panel configuration
@@ -69,9 +72,11 @@ interval = 2.0                # Seconds per page when paging
 font_shift = 0                # Font positioning adjustment (vertical)
 
 [fonts]
-# Font configuration (use absolute path for font_path)
-font_path = "/Users/mike/Documents/Code Projects/u8g2/tools/font/bdf"  # Directory containing font files
-font_name = "helvB12.bdf"  # Font filename (can be changed via web UI)
+# Font configuration (use an absolute path for font_path)
+# Defaults to the fonts/ directory shipped with this repo. Bundled fonts:
+# helvB14.bdf, helvB18.bdf, helvB24.bdf, Roboto-Black-50.bdf
+font_path = "{bundled_fonts}"  # Directory containing font files
+font_name = "helvB14.bdf"  # Font filename (can be changed via web UI)
 
 [files]
 # Data file paths (relative to config directory)
@@ -113,8 +118,8 @@ udp_port = 5568              # UDP port to listen on
 buffer_size = 4096           # Maximum UDP packet size
 top_height = 24              # Height of top section (event name) in pixels
 bottom_height = 40           # Height of bottom section (time) in pixels
-top_font_name = "helvB12.bdf"    # Font for event name
-bottom_font_name = "helvB18.bdf" # Font for time display
+top_font_name = "helvB18.bdf"    # Font for event name
+bottom_font_name = "Roboto-Black-50.bdf" # Font for time display
 font_shift = 0               # Font positioning adjustment (vertical offset)
 # Hardware configuration for scoreboard (3 panels wide x 2 panels tall)
 width = 64                   # Base panel width
@@ -122,6 +127,27 @@ height = 32                  # Base panel height
 chain = 3                    # Panels chained horizontally
 parallel = 2                 # Panels stacked vertically
 gpio_slowdown = 4            # GPIO slowdown
+
+[manager]
+# display_manager.py — the process the systemd service starts.
+# It hosts the web UI and runs one display mode as a child process.
+active_mode = "display_event"   # display_event | athletic_live_scoreboard | udp_scoreboard
+auto_restart = true             # Restart the display mode if it exits
+restart_backoff_sec = 5         # Seconds to wait before restarting
+
+# Per-mode settings. display_event and udp_scoreboard read the sections above
+# ([display], [hardware], [scoreboard]) and need nothing here.
+[mode.display_event]
+
+[mode.athletic_live_scoreboard]
+# Required before this mode can start. Both values come from the scoreboard URL:
+# https://sb.athletic.live/...?name=FUSHIABOX&uuid=dc4113ed-...
+name = ""                       # Scoreboard computer name
+uuid = ""                       # Scoreboard UUID
+interval = 3.0                  # Poll interval in seconds
+font = "fonts/helvB14.bdf"      # BDF font
+
+[mode.udp_scoreboard]
 """
         try:
             with open(settings_path, "w", encoding="utf-8") as f:
