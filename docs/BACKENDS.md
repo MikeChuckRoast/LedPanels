@@ -16,12 +16,16 @@ wins.
 |---|---|---|---|
 | ColorLight 5A-75B | Linux/Unix only | root (raw sockets) | `colorlight_enabled = true` |
 | FPP / DDP | Any | none | `fpp_enabled = true` |
-| Direct `rgbmatrix` | Raspberry Pi | root (GPIO) | neither flag set, `rgbmatrix` installed |
+| Direct `rgbmatrix` | Raspberry Pi | root (GPIO) | neither flag set, `rgbmatrix` installed (not installed here) |
 | Emulator | Any | none | neither flag set, `RGBMatrixEmulator` installed |
 
 The last two share a path: `try_import_rgbmatrix()` tries the real `rgbmatrix`
 bindings first, then `RGBMatrixEmulator`, then `rgbmatrix_emulator`. If none
 import, it returns `(None, None, None)` and the caller fails.
+
+`rgbmatrix` is **not installed on the Pi** — see
+[Direct GPIO (rgbmatrix)](#direct-gpio-rgbmatrix) for why, and for how to
+restore it.
 
 Configure in `[network]` of `config/settings.toml`:
 
@@ -64,11 +68,15 @@ truth and is kept in sync with [`colorlight_output.py`](../colorlight_output.py)
 ### Usage
 
 ```bash
-sudo python display_manager.py --config-dir ./config     # with colorlight_enabled = true
+sudo .venv/bin/python display_manager.py --config-dir ./config   # colorlight_enabled = true
 
 # or drive a single mode directly:
-sudo python display_event.py --colorlight --colorlight-interface eth0
+sudo .venv/bin/python display_event.py --colorlight --colorlight-interface eth0
 ```
+
+Call the venv's interpreter by full path. Plain `sudo python` resolves through
+root's `PATH`, silently escaping the virtual environment and failing on the
+first import.
 
 ### Performance
 
@@ -165,6 +173,81 @@ roughly 5–10 ms.
 `FPPMatrix.__init__` hardcodes destination ID `0x01`. Driving several
 independent DDP destinations would require making that a parameter. Pixel
 mapping and brightness are configured inside FPP itself — no code changes here.
+
+---
+
+## Direct GPIO (rgbmatrix)
+
+Drives HUB75 panels straight off the Pi's GPIO header through an adapter HAT,
+using the [hzeller `rpi-rgb-led-matrix`](https://github.com/hzeller/rpi-rgb-led-matrix)
+bindings. **This project no longer installs it**, and
+[`requirements-pi.txt`](../requirements-pi.txt) says so where the dependency
+used to be.
+
+### Why it was dropped
+
+The ColorLight 5A-75B card replaced the HAT and is the more capable option, so
+there are no plans to go back. Removing the dependency also removed the most
+fragile line in the Pi install: `rgbmatrix` cannot be pip-installed. The
+bindings are compiled from source and installed system-wide with
+`sudo make install-python`, and the `rgbmatrix` name on PyPI is an unrelated
+package. Inside a fresh virtual environment that pin was liable to fail the
+whole install for a backend that never loads.
+
+Nothing is lost by its absence, because the two backends are alternatives that
+are never used together:
+
+- `get_matrix_backend()` checks ColorLight first and **returns before**
+  `try_import_rgbmatrix()` is reached — see the precedence order above.
+- `create_colorlight_backend()` returns
+  `(factory, ColorLightOptions, ColorLightGraphics)`, the same triple shape the
+  `rgbmatrix` import produces. `ColorLightGraphics` implements its own `Color`,
+  `Font`, and BDF parser rather than wrapping the real library, so the display
+  modes cannot tell which backend they were handed.
+
+The one place that still wants it directly is
+[`tools/display_image.py`](../tools/display_image.py), which has a private
+`try_import_rgbmatrix()` and no ColorLight path. On this Pi it falls back to
+writing a preview PNG instead of lighting the panel.
+
+### Restoring it
+
+1. Build and install the bindings system-wide:
+
+   ```bash
+   git clone https://github.com/hzeller/rpi-rgb-led-matrix
+   cd rpi-rgb-led-matrix/bindings/python
+   sudo apt install python3-dev cython3
+   make build-python
+   sudo make install-python
+   ```
+
+2. Confirm the system Python can see them, and that the venv can too:
+
+   ```bash
+   python3 -c "import rgbmatrix; print(rgbmatrix.__file__)"
+   sudo .venv/bin/python -c "import rgbmatrix; print(rgbmatrix.__file__)"
+   ```
+
+   The second command works only because the venv is created with
+   `--system-site-packages` (see [pi/setup.sh](../pi/setup.sh)). A strictly
+   isolated venv cannot see system-installed bindings at all, and re-adding
+   this backend would mean rebuilding the venv with that flag.
+
+3. Disable ColorLight so the precedence chain falls through to GPIO, and check
+   that `[hardware]` matches the HAT wiring:
+
+   ```toml
+   [network]
+   colorlight_enabled = false
+   fpp_enabled = false
+   ```
+
+   The `gpio_slowdown` keys under `[hardware]` and `[scoreboard]` are already
+   carried in the config templates and are read only by this backend.
+
+4. Optionally restore the dependency note in `requirements-pi.txt`, remembering
+   that the install is the `make install-python` above, not a pip line.
 
 ---
 

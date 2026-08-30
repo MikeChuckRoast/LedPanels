@@ -2,14 +2,18 @@
 
 Drives RGB LED panels at track meets. One manager process hosts a web UI and
 runs one of three display modes: a Lynx starting roster, an AthleticLIVE field
-scoreboard, or a UDP-driven event clock. Output goes to Raspberry Pi GPIO, a
-ColorLight 5A-75B Ethernet controller, or an FPP/DDP receiver.
+scoreboard, or a UDP-driven event clock. Output goes to a ColorLight 5A-75B
+Ethernet controller, an FPP/DDP receiver, or — with the bindings installed
+separately — Raspberry Pi GPIO.
 
 ## Table of Contents
 
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
+  - [Windows / macOS (development)](#windows--macos-development)
+  - [Raspberry Pi (production)](#raspberry-pi-production)
+  - [Updating a Pi](#updating-a-pi)
 - [Display Modes](#display-modes)
   - [display_event — starting roster](#display_event--starting-roster)
   - [athletic_live_scoreboard — field scoreboard](#athletic_live_scoreboard--field-scoreboard)
@@ -58,8 +62,18 @@ Shared modules: [`config_loader.py`](config_loader.py) (settings and validation)
 
 ## Quick Start
 
+On a **Raspberry Pi**, one script does everything — virtual environment,
+dependencies, config, and optionally the systemd service:
+
 ```bash
-pip install -r requirements.txt          # or requirements-pi.txt on a Pi
+sudo pi/setup.sh --install-service
+sudo systemctl start led-display
+```
+
+For **development** on Windows or macOS:
+
+```bash
+pip install -r requirements.txt
 
 cp config/settings.toml.example config/settings.toml
 # edit [fonts].font_path to the absolute path of this repo's fonts/ directory
@@ -69,8 +83,6 @@ python display_manager.py --config-dir ./config
 
 Then open `http://localhost:5000` — or `http://<pi-ip>:5000` from another
 machine — and pick a display mode.
-
-On a Pi with ColorLight or direct GPIO output, prefix with `sudo`.
 
 ---
 
@@ -103,23 +115,58 @@ font_name = "helvB14.bdf"
 
 ### Raspberry Pi (production)
 
-```bash
-pip install -r requirements-pi.txt       # includes requirements.txt plus evdev, rgbmatrix
-```
-
-Or system-wide via apt:
+Raspberry Pi OS Bookworm marks its system Python as externally managed
+(PEP 668), so `pip install` into it is refused. The Pi runs from a virtual
+environment at `.venv/` instead.
 
 ```bash
-sudo apt install python3-flask python3-watchdog python3-pillow \
-                 python3-tomli-w python3-evdev
+sudo pi/setup.sh --install-service
 ```
+
+That script is idempotent — safe to re-run — and it:
+
+- creates `.venv/` with `--system-site-packages`, so apt-installed modules such
+  as `python3-evdev` remain visible and pip fetches only what Debian lacks
+- installs [`requirements-pi.txt`](requirements-pi.txt)
+- seeds `config/settings.toml` from `settings.toml.pi` and
+  `config/current_event.json` from its example, never overwriting existing files
+- rewrites `[fonts].font_path` to this checkout's actual `fonts/` directory
+- with `--install-service`, installs and enables the systemd unit, rewriting its
+  hardcoded paths to match wherever the repo lives
+
+Run it with `sudo`. The venv must be root-owned because the service runs as root
+for ColorLight's raw Ethernet sockets, and a root-executed interpreter sitting in
+a user-writable directory would let that user run code as root.
+
+To run the manager by hand, call the venv's interpreter by full path:
 
 ```bash
-cp config/settings.toml.pi config/settings.toml       # Pi font path, ColorLight enabled
-cp config/current_event.json.example config/current_event.json
+sudo .venv/bin/python display_manager.py --config-dir ./config
 ```
 
-Root is required for GPIO and for ColorLight's raw Ethernet sockets.
+Plain `sudo python` resolves through root's `PATH` and silently escapes the
+virtual environment, failing on the first import. This applies to every script
+in the project, `tools/` included.
+
+Direct GPIO output via `rgbmatrix` is **not installed** — the ColorLight card
+replaced the HAT. It is an alternative backend, never a companion to ColorLight;
+see [docs/BACKENDS.md](docs/BACKENDS.md#direct-gpio-rgbmatrix) for the reasoning
+and for how to restore it.
+
+### Updating a Pi
+
+```bash
+git pull
+sudo pi/setup.sh --update            # reinstall dependencies only
+sudo systemctl restart led-display
+```
+
+If an OS upgrade moves the system Python to a new minor version, the venv is
+left pointing at an interpreter that no longer exists. Rebuild it:
+
+```bash
+sudo pi/setup.sh --recreate
+```
 
 ---
 
@@ -401,7 +448,10 @@ exception — those restart the child process directly.
 ## Pi Systemd Service
 
 [`pi/led-display.service`](pi/led-display.service) runs `display_manager.py` at
-boot as root, which is required for GPIO and raw Ethernet.
+boot as root, which is required for raw Ethernet.
+
+`pi/setup.sh --install-service` installs it, rewriting the paths for this
+checkout. To do it by hand instead:
 
 ```bash
 sudo cp pi/led-display.service /etc/systemd/system/
@@ -416,8 +466,15 @@ sudo systemctl restart led-display        # after config changes
 sudo journalctl -u led-display -f         # follow logs
 ```
 
+`ExecStart` invokes `.venv/bin/python` by absolute path. Running that
+interpreter is what activates the virtual environment — systemd has no shell to
+`source activate` in, and setting `PATH` would not help. The manager spawns each
+display mode with `sys.executable`, so mode children inherit the same
+interpreter without any extra configuration.
+
 The unit hardcodes `/home/mike/LedPanels`. Update `WorkingDirectory` and
-`ExecStart` if you install elsewhere.
+`ExecStart`, or let `pi/setup.sh --install-service` rewrite them, if you install
+elsewhere.
 
 Note that both systemd (`Restart=always`) and the manager (`auto_restart`)
 restart things. Systemd restarts the manager; the manager restarts the display
@@ -433,7 +490,7 @@ Everything in `tools/` is run from the project root.
 | Script | Purpose |
 |---|---|
 | `tools/clear_display.py` | Send an all-black frame. Dispatches on the enabled `[network]` backend; with neither enabled it reports that raw `rgbmatrix` cannot be blanked externally and exits. |
-| `tools/display_image.py` | Show a `.bmp`/`.png`, resized to the panel. Without `rgbmatrix` it saves a preview PNG instead. Holds for an hour, then exits. |
+| `tools/display_image.py` | Show a `.bmp`/`.png`, resized to the panel. Needs `rgbmatrix` directly and has no ColorLight path, so with the current setup it always saves a preview PNG instead. Holds for an hour, then exits. |
 | `tools/update_team_colors.py` | Append affiliations found in `lynx.evt` but missing from `colors.csv`, with default colours. |
 | `tools/fetch_team_colors.py` | Scrape team badge colours from athletic.net by team ID. Needs `requirements-tools.txt` and ChromeDriver. |
 | `tools/upload_events.py` | Push `lynx.evt` / `lynx.sch` to a running web server without SSH. |
@@ -443,14 +500,19 @@ Everything in `tools/` is run from the project root.
 | `tools/test_colorlight_frames.py` | Send known frame patterns to a ColorLight card to debug ordering and timing. |
 | `tools/test_keyboard.py` | List `/dev/input/` devices and print key presses; use it to find `[keyboard].device_path`. |
 
+On the Pi these run through the virtual environment, so use `.venv/bin/python`
+rather than `python`:
+
 ```bash
-sudo python tools/clear_display.py
-python tools/display_image.py --image logo.png --out preview.png
-python tools/update_team_colors.py config/
-python tools/upload_events.py --server-url http://192.168.1.50:5000 \
+sudo .venv/bin/python tools/clear_display.py
+.venv/bin/python tools/display_image.py --image logo.png --out preview.png
+.venv/bin/python tools/update_team_colors.py config/
+.venv/bin/python tools/upload_events.py --server-url http://192.168.1.50:5000 \
   --events-file config/lynx.evt --schedule-file config/lynx.sch --combined
-sudo python tools/test_keyboard.py
+sudo .venv/bin/python tools/test_keyboard.py
 ```
+
+On a development machine, plain `python` is fine.
 
 ### archive/
 

@@ -6,7 +6,18 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/home/mike/LedPanels
-ExecStart=/usr/bin/python3 /home/mike/LedPanels/display_manager.py --config-dir /home/mike/LedPanels/config
+
+# Runs the virtual environment's interpreter directly. Executing .venv/bin/python
+# activates the venv on its own — no "source activate" is needed, and setting
+# PATH would not help systemd find it.
+#
+# display_manager spawns each display mode with sys.executable, so the mode
+# children inherit this interpreter automatically.
+#
+# Paths assume the repo is at /home/mike/LedPanels. `pi/setup.sh --install-service`
+# rewrites them for whatever directory the repo actually lives in.
+ExecStart=/home/mike/LedPanels/.venv/bin/python /home/mike/LedPanels/display_manager.py --config-dir /home/mike/LedPanels/config
+
 Restart=always
 RestartSec=10
 StandardOutput=journal

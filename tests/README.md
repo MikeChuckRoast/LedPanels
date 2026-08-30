@@ -33,6 +33,15 @@ tests/
 pip install -r requirements-dev.txt
 ```
 
+On a Raspberry Pi, install into the virtual environment and run `pytest` from
+there — the system Python is externally managed (PEP 668) and lacks the
+project's dependencies:
+
+```bash
+sudo .venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m pytest
+```
+
 ### Run All Tests
 
 ```bash

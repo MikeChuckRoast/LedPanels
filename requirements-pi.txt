@@ -1,6 +1,22 @@
 # Raspberry Pi / Linux hardware dependencies
 # Install on Pi instead of requirements.txt (includes everything)
+#
+# Install into the virtual environment created by pi/setup.sh:
+#   sudo .venv/bin/python -m pip install -r requirements-pi.txt
 
 -r requirements.txt
 evdev>=1.6
-rgbmatrix>=0.0.1
+
+# rgbmatrix is deliberately NOT installed.
+#
+# It drives HUB75 panels directly off the Pi's GPIO header (a HAT), which this
+# setup replaced with a ColorLight 5A-75B receiver card. The two are alternative
+# backends, never used together: get_matrix_backend() in matrix_backend.py tries
+# ColorLight first and returns before rgbmatrix is ever imported, and
+# colorlight_output.py supplies its own API-compatible matrix, options, and
+# graphics classes.
+#
+# It also cannot be pip-installed. The hzeller bindings are built from source and
+# installed system-wide; the `rgbmatrix` name on PyPI is an unrelated package.
+#
+# To go back to a GPIO HAT, see "Direct GPIO (rgbmatrix)" in docs/BACKENDS.md.
