@@ -1,5 +1,8 @@
 # ColorLight 5A-75B Protocol - Working Implementation
 
+> Wire-level reference for [`colorlight_output.py`](../colorlight_output.py).
+> For setup, configuration, and troubleshooting, see [BACKENDS.md](BACKENDS.md).
+
 ## Overview
 
 This documents the working protocol implementation for ColorLight 5A-75B LED receiver cards, based on the PyLights project but with corrections for proper operation.
