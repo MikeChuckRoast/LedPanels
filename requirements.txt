@@ -5,3 +5,4 @@ tomli_w>=1.0
 watchdog>=3.0
 Pillow>=10.0
 pynput>=1.7
+requests>=2.31   # athletic_live_scoreboard.py polls the AthleticLIVE API
