@@ -17,10 +17,8 @@ Displays athlete event data and real-time scoreboards on RGB LED panels, driven 
   - [udp_scoreboard.py](#udp_scoreboardpy)
 - [Web Interface](#web-interface)
 - [Utilities](#utilities)
-  - [clear_display.py](#clear_displaypy)
-  - [display_image.py](#display_imagepy)
-  - [scroll.py / scroll2.py](#scrollpy--scroll2py)
   - [tools/](#tools)
+  - [archive/](#archive)
 - [Pi Systemd Service](#pi-systemd-service)
 
 ---
@@ -378,32 +376,41 @@ python tools/test_scoreboard.py --port 5568
 | GET/POST | `/api/teams` | Get or update team colors |
 | GET/POST | `/api/display_settings` | Get or update display settings |
 | POST | `/api/teams/add_missing` | Add teams from `lynx.evt` not in `colors.csv` |
-| POST | `/api/upload_events` | Upload a new `lynx.evt` file |
-| POST | `/api/upload_schedule` | Upload a new `lynx.sch` file |
+| POST | `/api/upload/events` | Upload a new `lynx.evt` file |
+| POST | `/api/upload/schedule` | Upload a new `lynx.sch` file |
+| POST | `/api/upload/combined` | Upload `lynx.evt` and `lynx.sch` together |
+
+See [API_DOCUMENTATION.md](API_DOCUMENTATION.md) for full request/response schemas.
 
 ---
 
 ## Utilities
 
-### clear_display.py
+All utilities live in `tools/` and are run from the project root.
 
-Clears the LED display to black. Useful before rebooting to avoid leaving a static image on the panels.
+### tools/
+
+#### clear_display.py
+
+Sends an all-black frame to the display. Useful before rebooting to avoid leaving a static image on the panels.
+
+Dispatches on the backend enabled in `[network]` — ColorLight first, then FPP. Raw `rgbmatrix` hardware is owned by the display process and cannot be blanked from a separate process; with neither network backend enabled the script reports this and exits. Use the web UI's display power toggle instead.
 
 ```bash
-sudo python clear_display.py
-sudo python clear_display.py --config-dir /path/to/config
+sudo python tools/clear_display.py
+sudo python tools/clear_display.py --config-dir /path/to/config
 ```
 
 ---
 
-### display_image.py
+#### display_image.py
 
-Displays a `.bmp` or `.png` image on the LED panels, automatically resizing it to the display dimensions. On Windows (no `rgbmatrix`), saves a preview PNG instead.
+Displays a `.bmp` or `.png` image on the LED panels, automatically resizing it to the display dimensions. On Windows (no `rgbmatrix`), saves a preview PNG instead. Holds the image for one hour, then exits.
 
 ```bash
-python display_image.py --image logo.png
-python display_image.py --image logo.png --width 128 --height 32 --chain 2
-python display_image.py --image logo.png --out preview.png   # Save preview only
+python tools/display_image.py --image logo.png
+python tools/display_image.py --image logo.png --width 128 --height 32 --chain 2
+python tools/display_image.py --image logo.png --out preview.png   # Save preview only
 ```
 
 | Flag | Default | Description |
@@ -417,19 +424,6 @@ python display_image.py --image logo.png --out preview.png   # Save preview only
 | `--out FILENAME` | `output_preview.png` | Preview output path |
 
 ---
-
-### scroll.py / scroll2.py
-
-Demonstration scripts showing scrolling text on the LED panels. Not production tools — edit the variables at the top of each file (`TEXT`, `COLOR`, `FONT_PATH`, `SCROLL_SPEED`) to customise.
-
-```bash
-sudo python scroll.py
-sudo python scroll2.py
-```
-
----
-
-### tools/
 
 #### update_team_colors.py
 
@@ -504,9 +498,22 @@ sudo python tools/test_keyboard.py
 
 ---
 
+### archive/
+
+Retired scripts, kept for reference only. Not part of the running system and not
+imported by anything:
+
+| File | What it was |
+|---|---|
+| `archive/scroll.py`, `archive/scroll2.py` | Scrolling-text demos. Edit `TEXT`, `COLOR`, `FONT_PATH`, `SCROLL_SPEED` at the top of each file. |
+| `archive/led_display.py` | Early two-row message + clock prototype. Superseded by `udp_scoreboard.py`. Hard-codes a `u8g2` font path that no longer exists. |
+| `archive/keyboard_listener.py` | Standalone `pynput` key-name printer. Superseded by `tools/test_keyboard.py`. |
+
+---
+
 ## Pi Systemd Service
 
-The `pi/led-display.service` file configures `display_event.py` to run automatically at boot.
+The `pi/led-display.service` file configures `display_manager.py` to run automatically at boot. The manager hosts the web UI and starts whichever display mode is set in `[manager].active_mode`.
 
 **Setup:**
 
