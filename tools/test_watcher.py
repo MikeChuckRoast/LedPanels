@@ -2,8 +2,13 @@
 """Quick test of file_watcher module"""
 
 import logging
+import os
+import sys
 import time
 from pathlib import Path
+
+# Allow running from project root or tools/ directory
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from file_watcher import start_file_watcher
 

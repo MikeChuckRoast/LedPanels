@@ -5,8 +5,8 @@ Displays a .bmp or .png image on the LED panels using rgbmatrix if available,
 or saves a preview image using PIL if not. Accepts the image path as a command-line argument.
 
 Usage:
-    python display_image.py --image path/to/image.png
-    python display_image.py --image path/to/image.bmp --width 128 --height 32
+    python tools/display_image.py --image path/to/image.png
+    python tools/display_image.py --image path/to/image.bmp --width 128 --height 32
 """
 import argparse
 import logging
@@ -52,7 +52,7 @@ def display_with_rgbmatrix(image_path, width, height, chain=1, parallel=1, gpio_
             canvas.SetPixel(x, y, r, g, b)
     canvas = matrix.SwapOnVSync(canvas)
     logging.info("Image displayed on matrix.")
-    time.sleep(3600)  # Keeps the image on the display for 5 seconds
+    time.sleep(3600)  # Hold the image on the display for an hour, then exit
 
 def display_with_pil(image_path, width, height, out_file="output_preview.png"):
     from PIL import Image
