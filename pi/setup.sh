@@ -151,7 +151,7 @@ say "Verifying"
 import importlib.util
 import sys
 
-required = ["flask", "watchdog", "PIL", "tomli_w", "requests", "tomllib"]
+required = ["flask", "watchdog", "PIL", "tomli_w", "requests", "bdflib", "tomllib"]
 missing = [m for m in required if importlib.util.find_spec(m) is None]
 if missing:
     print("    MISSING: " + ", ".join(missing))

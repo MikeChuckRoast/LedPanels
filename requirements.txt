@@ -6,3 +6,4 @@ watchdog>=3.0
 Pillow>=10.0
 pynput>=1.7
 requests>=2.31   # athletic_live_scoreboard.py polls the AthleticLIVE API
+bdflib>=2.0      # display_utils.load_font_metadata(); every display mode calls it at startup
