@@ -236,3 +236,112 @@ class TestCreateColorLightBackend:
 
         # Backend should use the specified interface
         assert backend is not None
+
+
+@skipif_windows
+class TestColorLightSetImage:
+    """Tests for the bulk-blit path used by animation playback."""
+
+    @staticmethod
+    def _pixel(matrix, x, y):
+        """Read back one pixel as (r, g, b). The buffer itself holds BGR."""
+        b, g, r = (int(v) for v in matrix.buffer[y][x])
+        return r, g, b
+
+    @staticmethod
+    def _matrix(width=8, height=4):
+        # row_delay_ms=0 keeps the cold-boot priming in __init__ instant.
+        return ColorLightMatrix(interface="eth0", width=width, height=height,
+                                row_delay_ms=0)
+
+    @patch('socket.socket')
+    def test_matches_setpixel_for_the_same_image(self, mock_socket):
+        from PIL import Image
+
+        image = Image.new("RGB", (8, 4))
+        for x in range(8):
+            for y in range(4):
+                image.putpixel((x, y), (x * 30 % 256, y * 60 % 256, (x + y) * 20 % 256))
+
+        blitted = self._matrix()
+        blitted.SetImage(image)
+
+        by_pixel = self._matrix()
+        for x in range(8):
+            for y in range(4):
+                by_pixel.SetPixel(x, y, *image.getpixel((x, y)))
+
+        for x in range(8):
+            for y in range(4):
+                assert self._pixel(blitted, x, y) == self._pixel(by_pixel, x, y)
+
+    @patch('socket.socket')
+    def test_stores_bgr_in_the_buffer(self, mock_socket):
+        """The card takes BGR; a blit that skipped the swap would look wrong."""
+        from PIL import Image
+
+        matrix = self._matrix(2, 2)
+        matrix.SetImage(Image.new("RGB", (2, 2), (10, 20, 30)))
+
+        assert list(matrix.buffer[0][0]) == [30, 20, 10]
+        assert self._pixel(matrix, 0, 0) == (10, 20, 30)
+
+    @patch('socket.socket')
+    def test_offset_positions_the_image(self, mock_socket):
+        from PIL import Image
+
+        matrix = self._matrix(8, 8)
+        matrix.SetImage(Image.new("RGB", (2, 2), (255, 255, 255)), 3, 4)
+
+        assert self._pixel(matrix, 3, 4) == (255, 255, 255)
+        assert self._pixel(matrix, 2, 4) == (0, 0, 0)
+
+    @patch('socket.socket')
+    def test_clips_an_oversized_image_instead_of_erroring(self, mock_socket):
+        from PIL import Image
+
+        matrix = self._matrix(4, 4)
+        matrix.SetImage(Image.new("RGB", (100, 100), (1, 2, 3)))
+
+        assert self._pixel(matrix, 3, 3) == (1, 2, 3)
+
+    @patch('socket.socket')
+    def test_fully_offscreen_image_is_a_no_op(self, mock_socket):
+        from PIL import Image
+
+        matrix = self._matrix(4, 4)
+        matrix.SetImage(Image.new("RGB", (4, 4), (255, 0, 0)), 10, 10)
+
+        assert self._pixel(matrix, 0, 0) == (0, 0, 0)
+
+
+@skipif_windows
+class TestColorLightRowDelay:
+    """Tests for the configurable per-row pacing delay."""
+
+    @patch('socket.socket')
+    def test_defaults_to_the_pylights_value(self, mock_socket):
+        matrix = ColorLightMatrix(interface="eth0", width=4, height=2)
+        assert matrix.row_delay_sec == pytest.approx(0.001)
+
+    @patch('socket.socket')
+    def test_converts_milliseconds_to_seconds(self, mock_socket):
+        matrix = ColorLightMatrix(interface="eth0", width=4, height=2,
+                                  row_delay_ms=0.25)
+        assert matrix.row_delay_sec == pytest.approx(0.00025)
+
+    @patch('socket.socket')
+    def test_negative_delay_is_clamped_to_zero(self, mock_socket):
+        matrix = ColorLightMatrix(interface="eth0", width=4, height=2,
+                                  row_delay_ms=-5)
+        assert matrix.row_delay_sec == 0.0
+
+    @patch('socket.socket')
+    def test_factory_passes_the_delay_through(self, mock_socket):
+        factory, options_cls, _ = create_colorlight_backend("eth0", 4, 2,
+                                                            row_delay_ms=0)
+        options = options_cls()
+        options.cols, options.rows = 4, 2
+        options.chain_length, options.parallel = 1, 1
+
+        assert factory(options).row_delay_sec == 0.0

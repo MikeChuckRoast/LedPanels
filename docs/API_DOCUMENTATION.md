@@ -497,6 +497,129 @@ else:
 
 ---
 
+## Animation API
+
+Endpoints for the `animation_display` mode. Clips live in `config/animations/`.
+
+Unlike the `lynx.evt` and `lynx.sch` uploads above, which take the file as a
+JSON string field, animation upload is **multipart** — the payload is binary and
+a base64 round trip would inflate a video by a third.
+
+Supported extensions: `.gif`, `.apng`, `.png`, `.webp`, `.mp4`, `.mov`, `.webm`,
+`.mkv`, `.m4v`, `.avi`. Video requires `ffmpeg` on the server's `PATH`.
+
+### List Animations
+
+**Endpoint:** `GET /api/animations`
+
+**Success Response (200):**
+```json
+{
+  "animations": [
+    {"name": "logo.gif", "size": 48213, "modified": 1757068800.0}
+  ]
+}
+```
+
+Files with an unsupported extension are ignored, as is the internal `.staging`
+directory used while an upload is validated.
+
+### Upload Animation
+
+**Endpoint:** `POST /api/upload/animation`
+**Content-Type:** `multipart/form-data`
+**Field:** `file`
+
+The upload is staged, decoded to prove it is playable, and only then moved into
+place. A file that fails to decode is discarded and never appears in the
+listing. Uploading a name that already exists replaces it.
+
+Filenames are sanitised with `secure_filename`, so a path-traversal attempt such
+as `../../evil.gif` is flattened to `evil.gif` and still lands inside
+`config/animations/`.
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "name": "logo.gif",
+  "size": 48213,
+  "replaced": false
+}
+```
+
+**Error Responses:**
+
+| Status | Cause |
+|---|---|
+| 400 | Missing `file` field |
+| 400 | Unsupported or invalid filename — the message lists supported types |
+| 400 | `Could not decode animation: …` — the file is not a readable clip |
+| 413 | Body exceeds the 64 MB `MAX_CONTENT_LENGTH` cap |
+| 500 | Unexpected server error |
+
+**Example with curl:**
+```bash
+curl -F "file=@logo.gif" http://localhost/api/upload/animation
+```
+
+**Example with Python:**
+```python
+import requests
+
+with open("logo.gif", "rb") as f:
+    response = requests.post(
+        "http://localhost/api/upload/animation",
+        files={"file": ("logo.gif", f)},
+    )
+
+if response.status_code == 200:
+    print(f"Uploaded {response.json()['name']}")
+else:
+    print(f"Error: {response.json()['error']}")
+```
+
+### Delete Animation
+
+**Endpoint:** `DELETE /api/animations/<name>`
+
+**Success Response (200):**
+```json
+{"success": true, "name": "logo.gif"}
+```
+
+**Error Responses:**
+
+| Status | Cause |
+|---|---|
+| 400 | Invalid name, or an extension that is not a supported animation type |
+| 404 | No such clip |
+
+Deleting the clip that is currently playing does not stop playback — the frames
+are already decoded into memory — but the mode will fail to start next time.
+
+### Selecting a Clip
+
+Which clip plays is a mode setting, not part of these endpoints. Use
+`POST /api/mode_settings/animation_display`:
+
+```json
+{
+  "settings": {
+    "file": "logo.gif",
+    "fit": "contain",
+    "fps": 0,
+    "loop": true
+  }
+}
+```
+
+Saving mode settings restarts the mode if it is the active one. Overwriting the
+clip that is already playing does not need a restart — the mode notices the file
+changed within about two seconds and reloads it.
+
+---
+
 ## Complete Integration Example
 
 Here's a complete Python script that updates both files and sets the current event:

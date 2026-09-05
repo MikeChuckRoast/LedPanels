@@ -22,6 +22,9 @@ tests/
 ├── test_fpp_output.py            # FPP protocol tests
 ├── test_colorlight_output.py     # ColorLight protocol tests
 ├── test_web_server.py            # Web interface tests
+├── test_display_manager.py       # Mode registry and arg building tests
+├── test_animation_loader.py      # GIF/video decoding tests
+├── test_animation_display.py     # Animation playback and scheduling tests
 └── test_display_event.py         # Integration tests
 ```
 
@@ -74,6 +77,18 @@ pytest -v
 pytest tests/test_config_loader.py::TestLoadSettings::test_loads_valid_settings_toml
 ```
 
+### Skipped Tests
+
+A clean run reports skips, which are expected rather than failures:
+
+| Skipped | Reason |
+|---|---|
+| `test_colorlight_output.py` (most) | ColorLight needs `AF_PACKET`, which is Linux-only. These run on the Pi. |
+| `TestLoadVideo` in `test_animation_loader.py` | Needs `ffmpeg` on `PATH`. GIF coverage is unconditional. |
+
+Everything else runs everywhere. On the Pi the ColorLight suite becomes live, so
+run the tests there too before trusting a backend change.
+
 ## Test Categories
 
 ### Core Module Tests
@@ -92,6 +107,9 @@ pytest tests/test_config_loader.py::TestLoadSettings::test_loads_valid_settings_
 ### Web and Integration Tests
 
 - **test_web_server.py**: Flask routes, API endpoints, file operations
+- **test_display_manager.py**: Mode registry consistency, per-mode CLI arg building
+- **test_animation_loader.py**: Fit geometry, GIF decoding, ffmpeg filter graph
+- **test_animation_display.py**: Frame scheduling, frame dropping, playback loop
 - **test_display_event.py**: Full application integration, navigation, rendering
 
 ## Writing New Tests

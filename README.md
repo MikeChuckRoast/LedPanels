@@ -1,10 +1,10 @@
 # LED Panels
 
 Drives RGB LED panels at track meets. One manager process hosts a web UI and
-runs one of three display modes: a Lynx starting roster, an AthleticLIVE field
-scoreboard, or a UDP-driven event clock. Output goes to a ColorLight 5A-75B
-Ethernet controller, an FPP/DDP receiver, or — with the bindings installed
-separately — Raspberry Pi GPIO.
+runs one of four display modes: a Lynx starting roster, an AthleticLIVE field
+scoreboard, a UDP-driven event clock, or a looping animation. Output goes to a
+ColorLight 5A-75B Ethernet controller, an FPP/DDP receiver, or — with the
+bindings installed separately — Raspberry Pi GPIO.
 
 ## Table of Contents
 
@@ -18,6 +18,7 @@ separately — Raspberry Pi GPIO.
   - [display_event — starting roster](#display_event--starting-roster)
   - [athletic_live_scoreboard — field scoreboard](#athletic_live_scoreboard--field-scoreboard)
   - [udp_scoreboard — event clock](#udp_scoreboard--event-clock)
+  - [animation_display — GIF and video playback](#animation_display--gif-and-video-playback)
 - [Configuration](#configuration)
 - [Web Interface](#web-interface)
 - [Pi Systemd Service](#pi-systemd-service)
@@ -37,7 +38,8 @@ display_manager.py
 └── one child process, restarted on crash and on mode switch:
     ├── display_event.py .................. Lynx starting roster
     ├── athletic_live_scoreboard.py ....... AthleticLIVE field scoreboard
-    └── udp_scoreboard.py ................. UDP-driven event clock
+    ├── udp_scoreboard.py ................. UDP-driven event clock
+    └── animation_display.py .............. Looping GIF or video clip
 ```
 
 The manager owns the web server; the child owns the panel. Switching modes stops
@@ -53,6 +55,7 @@ Shared modules: [`config_loader.py`](config_loader.py) (settings and validation)
 [`event_parser.py`](event_parser.py) (Lynx `.evt` parsing, team colours),
 [`schedule_parser.py`](schedule_parser.py) (`.sch` heat progression),
 [`display_utils.py`](display_utils.py) (text layout, BDF metrics),
+[`animation_loader.py`](animation_loader.py) (GIF and video decoding),
 [`matrix_backend.py`](matrix_backend.py) (backend selection),
 [`colorlight_output.py`](colorlight_output.py) and
 [`fpp_output.py`](fpp_output.py) (the two network backends), and
@@ -134,6 +137,9 @@ That script is idempotent — safe to re-run — and it:
 - rewrites `[fonts].font_path` to this checkout's actual `fonts/` directory
 - with `--install-service`, installs and enables the systemd unit, rewriting its
   hardcoded paths to match wherever the repo lives
+- reports whether the two optional extras are present: `python3-evdev` for
+  keyboard heat navigation, and `ffmpeg` for video playback in
+  `animation_display` (GIFs need neither)
 
 Run it with `sudo`. The venv must be root-owned because the service runs as root
 for ColorLight's raw Ethernet sockets, and a root-executed interpreter sitting in
@@ -173,7 +179,7 @@ sudo pi/setup.sh --recreate
 
 ## Display Modes
 
-All three read `config/settings.toml` for hardware and network settings, so the
+All four read `config/settings.toml` for hardware and network settings, so the
 manager passes each only what it cannot infer. Every mode accepts the backend
 overrides described in [docs/BACKENDS.md](docs/BACKENDS.md).
 
@@ -279,6 +285,65 @@ other two. Anything in that section can be overridden on the command line
 
 Send test traffic with `python tools/test_scoreboard.py --port 5568`.
 
+### animation_display — GIF and video playback
+
+Plays a looping animation on the panel. The clip is decoded once at startup
+into panel-sized frames, then blitted from memory.
+
+```bash
+python animation_display.py --config-dir ./config --file logo.gif
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--config-dir PATH` | `./config` | Configuration directory |
+| `--file NAME` | from settings | Clip to play; a bare name resolves inside `config/animations/` |
+| `--fit MODE` | `contain` | `contain` (letterbox), `cover` (crop), `stretch` |
+| `--fps N` | `0` | Override the source frame rate; `0` keeps the clip's own timing |
+| `--background HEX` | `#000000` | Fill behind letterboxing and transparency |
+| `--no-loop` / `--once` | off | Play once and exit instead of repeating |
+| `--max-frames N` | `600` | Cap on decoded frames; longer clips are truncated |
+| `--ffmpeg PATH` | search `PATH` | Explicit ffmpeg binary |
+| `--width` / `--height` / `--chain` / `--parallel` | from `[hardware]` | Panel geometry |
+| `--colorlight-row-delay-ms N` | `1.0` | ColorLight pacing — see below |
+
+**Formats.** GIF, APNG and animated WebP decode through Pillow and need nothing
+extra. MP4, MOV, WebM, MKV, M4V and AVI are decoded by piping through the system
+`ffmpeg`, so video needs `sudo apt install ffmpeg` on the Pi. Without it, GIF
+still works and the mode says exactly what is missing. A single-frame PNG or GIF
+is valid too — it just holds a still image.
+
+Upload clips from the web UI (they land in `config/animations/`, which is
+gitignored), or drop files there by hand.
+
+#### Frame rate
+
+The panel write is the bottleneck, not the decode. `SwapOnVSync` in
+[`colorlight_output.py`](colorlight_output.py) pauses
+`[network].colorlight_row_delay_ms` after every row, so a 128-row panel spends
+~128 ms per frame in that pause alone — a ceiling near **7 fps**. Playback is
+driven by wall clock and drops frames rather than queueing them, so a 30 fps
+source still plays at the correct *speed*; it just shows fewer frames.
+
+After one pass through the clip the mode logs what it actually achieved:
+
+```
+First pass: rendered 12 of 48 frames (7.1 fps achieved, 24.0 fps in source)
+Dropping frames to hold real-time speed — the panel write is the limit.
+```
+
+Lowering `colorlight_row_delay_ms` is the only way to raise that ceiling. The
+default of `1.0` is the value this hardware was commissioned against (it comes
+from PyLights); lower values are faster but can tear or drop frames, and the
+safe setting is specific to the card and cabling. Change it in small steps and
+watch the panel. FPP sends one datagram per frame and has no such limit.
+
+#### Live editing
+
+Re-uploading or overwriting the clip that is currently playing reloads it within
+about two seconds — the mode stats the file as it plays. Changing *which* clip
+plays goes through mode settings, which restarts the child process as usual.
+
 ---
 
 ## Configuration
@@ -305,7 +370,7 @@ CLI arguments override file values, which override built-in defaults.
 | `[web]` | Web UI enable, host, port |
 | `[scoreboard]` | Everything `udp_scoreboard` needs — its own geometry and fonts |
 | `[manager]` | `active_mode`, `auto_restart`, `restart_backoff_sec` |
-| `[mode.*]` | Per-mode settings; only `athletic_live_scoreboard` has any |
+| `[mode.*]` | Per-mode settings; only `athletic_live_scoreboard` and `animation_display` have any |
 
 ```toml
 [hardware]
@@ -341,6 +406,13 @@ name = "FUSHIABOX"
 uuid = "dc4113ed-50f3-424d-ae9c-02f0745d7285"
 interval = 10
 font = "fonts/helvB14.bdf"
+
+[mode.animation_display]
+file = "logo.gif"     # resolved inside config/animations/
+fit = "contain"       # contain | cover | stretch
+fps = 0               # 0 keeps the clip's own timing
+loop = true
+background = "#000000"
 ```
 
 Bundled fonts in `fonts/`: `helvB14.bdf`, `helvB18.bdf`, `helvB24.bdf`,
@@ -369,13 +441,15 @@ gaps with `python tools/update_team_colors.py config/` or the web UI's
 
 **`config/lynx.evt`** — event data exported from the Lynx timing system.
 **`config/lynx.sch`** — schedule file for automatic heat progression.
+**`config/animations/`** — clips for `animation_display`, created on first run
+and populated by the web UI's upload button.
 
 ### Version control
 
 Tracked: `settings.toml.example`, `settings.toml.pi`,
 `current_event.json.example`, `lynx.sch.example`, `colors.csv`.
 Gitignored: `settings.toml` (local paths), `current_event.json` (runtime state),
-`lynx.evt` (meet data).
+`lynx.evt` (meet data), `animations/` (uploaded clips).
 
 ### Troubleshooting
 
@@ -386,6 +460,9 @@ Gitignored: `settings.toml` (local paths), `current_event.json` (runtime state),
 | `Font file not found` | `font_path` must be an absolute path to the directory holding the `.bdf` files. |
 | `Lynx event file not found` | Put `lynx.evt` in the config directory, or point `[files].lynx_file` at it. |
 | `requires 'name' and 'uuid'` | Fill in `[mode.athletic_live_scoreboard]` before selecting that mode. |
+| `requires 'file'` | Upload a clip and select it before switching to Animation. |
+| `needs ffmpeg, which was not found` | `sudo apt install ffmpeg`, or use a GIF instead. |
+| Animation looks jerky | Expected above ~7 fps on ColorLight; see [Frame rate](#frame-rate). |
 
 ---
 
@@ -397,7 +474,7 @@ network, or bind `web_host` to `127.0.0.1`.
 
 | URL | Purpose |
 |---|---|
-| `/` | Dashboard — mode switching, display power, event selection, AthleticLIVE settings |
+| `/` | Dashboard — mode switching, display power, event selection, AthleticLIVE and Animation settings |
 | `/teams` | Team colour editor backed by `colors.csv` |
 | `/display` | Display layout settings |
 
@@ -422,6 +499,9 @@ UI hides that section.
 | POST | `/api/upload/events` | Upload a new `lynx.evt` |
 | POST | `/api/upload/schedule` | Upload a new `lynx.sch` |
 | POST | `/api/upload/combined` | Upload both together (preferred — keeps them consistent) |
+| GET | `/api/animations` | List uploaded animation clips |
+| POST | `/api/upload/animation` | Upload a clip (multipart, 64 MB cap) |
+| DELETE | `/api/animations/<name>` | Delete a clip |
 
 Full request and response schemas are in
 [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md).

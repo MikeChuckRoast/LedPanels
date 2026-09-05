@@ -214,6 +214,9 @@ config/current_event.json
 config/lynx.evt
 config/lynx.sch
 
+# Animation clips uploaded through the web UI
+config/animations/
+
 # ColorLight config files
 *.rcvbp
 *.vsn

@@ -7,3 +7,10 @@ Pillow>=10.0
 pynput>=1.7
 requests>=2.31   # athletic_live_scoreboard.py polls the AthleticLIVE API
 bdflib>=2.0      # display_utils.load_font_metadata(); every display mode calls it at startup
+numpy>=1.24      # frame buffers in colorlight_output/fpp_output
+#
+# numpy was previously optional — both backends carry a pure-Python fallback and
+# log a warning. That fallback is fine for the text modes, which touch a handful
+# of pixels per frame, but animation_display blits whole frames: without numpy
+# SetImage degrades to a per-pixel Python loop, 16k iterations on a 128x128
+# panel, which cannot sustain playback. The fallbacks are kept and still tested.

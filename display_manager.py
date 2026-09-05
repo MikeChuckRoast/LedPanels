@@ -102,6 +102,22 @@ def _build_udp_scoreboard_args(config_dir: str) -> list:
     return ["--config-dir", config_dir]
 
 
+def _build_animation_args(config_dir: str) -> list:
+    cfg = load_mode_config(config_dir, "animation_display")
+    animation_file = str(cfg.get("file", "")).strip()
+    if not animation_file:
+        raise ConfigError(
+            "animation_display requires 'file' in [mode.animation_display] "
+            "settings — upload a clip from the web UI and select it"
+        )
+    # Everything else (panel geometry, backend) comes from settings.toml, which
+    # animation_display.py reads itself.
+    args = ["--config-dir", config_dir, "--file", animation_file]
+    if not cfg.get("loop", True):
+        args += ["--no-loop"]
+    return args
+
+
 # ---------------------------------------------------------------------------
 # Mode registry
 # ---------------------------------------------------------------------------
@@ -121,6 +137,11 @@ MODES = {
         "script": "udp_scoreboard.py",
         "build_args": _build_udp_scoreboard_args,
         "label": "UDP Scoreboard",
+    },
+    "animation_display": {
+        "script": "animation_display.py",
+        "build_args": _build_animation_args,
+        "label": "Animation",
     },
 }
 

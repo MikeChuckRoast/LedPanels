@@ -36,6 +36,12 @@ def ensure_config_directory(config_dir: str) -> None:
     except Exception as e:
         raise ConfigError(f"Failed to create config directory '{config_dir}': {e}")
 
+    # Where animation_display looks for clips, and where web uploads land.
+    try:
+        (config_path / "animations").mkdir(exist_ok=True)
+    except Exception as e:
+        raise ConfigError(f"Failed to create animations directory: {e}")
+
     # Create default current_event.json if it doesn't exist
     current_event_path = config_path / "current_event.json"
     if not current_event_path.exists():
@@ -92,6 +98,10 @@ fpp_port = 4048
 # ColorLight 5A-75B settings
 colorlight_enabled = false
 colorlight_interface = "eth0"
+# Pause after each row is written, in milliseconds. Dominates ColorLight frame
+# time — a 128-row panel spends ~128ms per frame here, capping it near 7fps.
+# Lower it to speed up animation, but too low tears frames; tune on hardware.
+colorlight_row_delay_ms = 1.0
 
 [keyboard]
 # Keyboard input settings (empty = auto-detect)
@@ -131,7 +141,7 @@ gpio_slowdown = 4            # GPIO slowdown
 [manager]
 # display_manager.py — the process the systemd service starts.
 # It hosts the web UI and runs one display mode as a child process.
-active_mode = "display_event"   # display_event | athletic_live_scoreboard | udp_scoreboard
+active_mode = "display_event"   # display_event | athletic_live_scoreboard | udp_scoreboard | animation_display
 auto_restart = true             # Restart the display mode if it exits
 restart_backoff_sec = 5         # Seconds to wait before restarting
 
@@ -148,6 +158,15 @@ interval = 3.0                  # Poll interval in seconds
 font = "fonts/helvB14.bdf"      # BDF font
 
 [mode.udp_scoreboard]
+
+[mode.animation_display]
+# A bare filename resolves inside config/animations/, where web UI uploads land.
+# GIF/APNG/WebP need nothing extra; MP4/MOV/WebM need ffmpeg on PATH.
+file = ""                       # Required before this mode can start
+fit = "contain"                 # contain (letterbox) | cover (crop) | stretch
+fps = 0                         # 0 keeps the source's own timing
+loop = true                     # Repeat forever vs. play once and exit
+background = "#000000"          # Fill behind letterboxing and transparency
 """
         try:
             with open(settings_path, "w", encoding="utf-8") as f:
@@ -247,6 +266,13 @@ def load_settings(config_dir: str) -> Dict[str, Any]:
     _validate_bool(net, "colorlight_enabled", "network")
     if "colorlight_interface" not in net or not isinstance(net["colorlight_interface"], str):
         raise ConfigError("'colorlight_interface' must be a string in [network] section")
+    # Optional — omitted means colorlight_output.DEFAULT_ROW_DELAY_MS
+    if "colorlight_row_delay_ms" in net:
+        value = net["colorlight_row_delay_ms"]
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+            raise ConfigError(
+                "'colorlight_row_delay_ms' must be a non-negative number in "
+                f"[network] section (got: {value})")
 
     # Validate keyboard
     kbd = settings["keyboard"]
@@ -436,6 +462,13 @@ _MODE_DEFAULTS: Dict[str, Dict] = {
         "font": "fonts/helvB14.bdf",
     },
     "udp_scoreboard": {},
+    "animation_display": {
+        "file": "",
+        "fit": "contain",
+        "fps": 0,
+        "loop": True,
+        "background": "#000000",
+    },
 }
 
 VALID_MODES = list(_MODE_DEFAULTS.keys())

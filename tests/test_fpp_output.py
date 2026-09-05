@@ -149,3 +149,125 @@ class TestCreateFPPBackend:
         # Result is (factory, options_class, graphics_class)
         assert isinstance(result, tuple)
         assert callable(result[0])  # factory function
+
+
+class TestFPPSetImage:
+    """Tests for the bulk-blit path used by animation playback."""
+
+    @staticmethod
+    def _pixel(matrix, x, y):
+        """Read back one pixel as (r, g, b), whatever the buffer type."""
+        return tuple(int(v) for v in matrix.buffer[y][x])
+
+    def test_matches_setpixel_for_the_same_image(self):
+        from PIL import Image
+
+        image = Image.new("RGB", (8, 4))
+        for x in range(8):
+            for y in range(4):
+                image.putpixel((x, y), (x * 30 % 256, y * 60 % 256, (x + y) * 20 % 256))
+
+        blitted = FPPMatrix(host="127.0.0.1", port=4048, width=8, height=4)
+        blitted.SetImage(image)
+
+        by_pixel = FPPMatrix(host="127.0.0.1", port=4048, width=8, height=4)
+        for x in range(8):
+            for y in range(4):
+                by_pixel.SetPixel(x, y, *image.getpixel((x, y)))
+
+        for x in range(8):
+            for y in range(4):
+                assert self._pixel(blitted, x, y) == self._pixel(by_pixel, x, y)
+
+    def test_stores_rgb_in_order(self):
+        from PIL import Image
+
+        matrix = FPPMatrix(host="127.0.0.1", port=4048, width=2, height=2)
+        matrix.SetImage(Image.new("RGB", (2, 2), (10, 20, 30)))
+
+        assert self._pixel(matrix, 0, 0) == (10, 20, 30)
+
+    def test_offset_positions_the_image(self):
+        from PIL import Image
+
+        matrix = FPPMatrix(host="127.0.0.1", port=4048, width=8, height=8)
+        matrix.SetImage(Image.new("RGB", (2, 2), (255, 255, 255)), 3, 4)
+
+        assert self._pixel(matrix, 3, 4) == (255, 255, 255)
+        assert self._pixel(matrix, 4, 5) == (255, 255, 255)
+        assert self._pixel(matrix, 2, 4) == (0, 0, 0)
+        assert self._pixel(matrix, 3, 3) == (0, 0, 0)
+
+    def test_clips_an_oversized_image_instead_of_erroring(self):
+        from PIL import Image
+
+        matrix = FPPMatrix(host="127.0.0.1", port=4048, width=4, height=4)
+        matrix.SetImage(Image.new("RGB", (100, 100), (1, 2, 3)))
+
+        assert self._pixel(matrix, 3, 3) == (1, 2, 3)
+
+    def test_negative_offset_clips_the_top_left(self):
+        from PIL import Image
+
+        matrix = FPPMatrix(host="127.0.0.1", port=4048, width=4, height=4)
+        matrix.SetImage(Image.new("RGB", (4, 4), (9, 9, 9)), -2, -2)
+
+        assert self._pixel(matrix, 0, 0) == (9, 9, 9)
+        assert self._pixel(matrix, 1, 1) == (9, 9, 9)
+        assert self._pixel(matrix, 2, 2) == (0, 0, 0)
+
+    def test_fully_offscreen_image_is_a_no_op(self):
+        from PIL import Image
+
+        matrix = FPPMatrix(host="127.0.0.1", port=4048, width=4, height=4)
+        matrix.SetImage(Image.new("RGB", (4, 4), (255, 0, 0)), 10, 10)
+
+        assert self._pixel(matrix, 0, 0) == (0, 0, 0)
+
+    def test_converts_non_rgb_modes(self):
+        from PIL import Image
+
+        matrix = FPPMatrix(host="127.0.0.1", port=4048, width=4, height=4)
+        matrix.SetImage(Image.new("L", (4, 4), 128))
+
+        assert self._pixel(matrix, 0, 0) == (128, 128, 128)
+
+
+class TestFPPSetImageWithoutNumpy:
+    """The pure-Python buffer fallback must blit identically to the numpy path."""
+
+    @staticmethod
+    def _pixel(matrix, x, y):
+        return tuple(int(v) for v in matrix.buffer[y][x])
+
+    def test_fallback_matches_the_numpy_path(self):
+        import fpp_output
+        from PIL import Image
+
+        image = Image.new("RGB", (6, 3))
+        for x in range(6):
+            for y in range(3):
+                image.putpixel((x, y), (x * 40 % 256, y * 80 % 256, 7))
+
+        fast = FPPMatrix(host="127.0.0.1", port=4048, width=6, height=3)
+        fast.SetImage(image)
+
+        with patch.object(fpp_output, 'NUMPY_AVAILABLE', False):
+            slow = FPPMatrix(host="127.0.0.1", port=4048, width=6, height=3)
+            slow.SetImage(image)
+
+        for x in range(6):
+            for y in range(3):
+                assert self._pixel(slow, x, y) == self._pixel(fast, x, y)
+
+    def test_fallback_honours_offset_and_clipping(self):
+        import fpp_output
+        from PIL import Image
+
+        with patch.object(fpp_output, 'NUMPY_AVAILABLE', False):
+            matrix = FPPMatrix(host="127.0.0.1", port=4048, width=4, height=4)
+            matrix.SetImage(Image.new("RGB", (4, 4), (9, 8, 7)), 2, 2)
+
+        assert self._pixel(matrix, 2, 2) == (9, 8, 7)
+        assert self._pixel(matrix, 3, 3) == (9, 8, 7)
+        assert self._pixel(matrix, 1, 1) == (0, 0, 0)

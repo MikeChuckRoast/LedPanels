@@ -21,9 +21,21 @@ class TestGetMatrixBackend:
             mock_colorlight.return_value = ('ColorLightMatrix', None, None)
             result = get_matrix_backend(use_colorlight=True, colorlight_interface='eth0')
             
-            mock_colorlight.assert_called_once_with('eth0', 64, 32)
+            mock_colorlight.assert_called_once_with('eth0', 64, 32, row_delay_ms=1.0)
             assert result[0] == 'ColorLightMatrix'
-    
+
+    def test_passes_a_custom_row_delay_through(self):
+        """The row delay is the main lever on ColorLight frame rate."""
+        from matrix_backend import get_matrix_backend
+
+        with patch('matrix_backend.create_colorlight_backend') as mock_colorlight:
+            mock_colorlight.return_value = ('ColorLightMatrix', None, None)
+            get_matrix_backend(use_colorlight=True, colorlight_interface='eth0',
+                               colorlight_row_delay_ms=0.2)
+
+            mock_colorlight.assert_called_once_with('eth0', 64, 32, row_delay_ms=0.2)
+
+
     def test_returns_fpp_when_enabled(self):
         """Test FPP backend is returned when use_fpp=True."""
         from matrix_backend import get_matrix_backend

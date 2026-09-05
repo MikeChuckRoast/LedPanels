@@ -93,6 +93,33 @@ This is fine for scoreboards and rosters, which change a few times per minute.
 It is not a video-rate backend. The card buffers the last frame it received, so
 you only send when content actually changes.
 
+#### Tuning the inter-row delay
+
+The 1 ms pause is `[network].colorlight_row_delay_ms`, and it is almost the
+entire frame time — the actual `send()` calls are microseconds. It comes from
+PyLights, and this hardware was commissioned against it.
+
+It only matters for [`animation_display`](../README.md#animation_display--gif-and-video-playback),
+where it sets a hard ceiling of roughly 7 fps on a 128-row panel. Lowering it is
+the only way to raise that ceiling:
+
+| `colorlight_row_delay_ms` | 128-row frame time | Ceiling |
+|---|---|---|
+| `1.0` (default) | ~143 ms | ~7 fps |
+| `0.5` | ~75 ms | ~13 fps |
+| `0.1` | ~20 ms | ~50 fps |
+| `0` | send-bound | hardware limit |
+
+Too low a value overruns the card: rows arrive faster than it can latch them and
+you get tearing, dropped frames, or a frozen display. The safe floor depends on
+the card, the cabling and the host NIC, so there is no value worth defaulting
+to — lower it in steps, watch the panel, and back off at the first artifact.
+The animation mode logs its achieved frame rate after one pass, which is the
+number to watch while tuning.
+
+Setting it to `0` also removes the pause from the cold-boot priming loop in
+`ColorLightMatrix.__init__`, which is the other place it is used.
+
 ### Troubleshooting
 
 | Symptom | Cause and fix |
@@ -261,7 +288,11 @@ writing a preview PNG instead of lighting the panel.
 | Network | Direct cable, not routable | Routable, works over WiFi |
 | Extra software | none | FPP must be installed and running |
 | Latency | ~40–143 ms per frame, by panel height | ~5–10 ms |
+| Animation frame rate | ~7 fps at 128 rows, tunable | not the bottleneck |
 
 Use **ColorLight** when you have the card, you are on the Pi, and the panel is
 cabled directly. Use **FPP** when developing on Windows or Mac, when the display
 is across a network, or when you would rather not run as root.
+
+For `animation_display` specifically, ColorLight's per-row pacing is the binding
+constraint; see [Tuning the inter-row delay](#tuning-the-inter-row-delay).

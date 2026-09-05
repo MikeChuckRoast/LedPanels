@@ -205,12 +205,16 @@
 
       async function renderModeSettings(mode) {
         const panel = document.getElementById("mode-settings-panel");
-        if (mode !== "athletic_live_scoreboard") {
-          panel.innerHTML = "";
-          return;
-        }
+        if (mode === "athletic_live_scoreboard")
+          return renderAlsSettings(panel);
+        if (mode === "animation_display") return renderAnimationSettings(panel);
+        panel.innerHTML = "";
+      }
+
+      async function renderAlsSettings(panel) {
         // Don't overwrite existing inputs — they may contain unsaved edits
         if (document.getElementById("als-name")) return;
+        const mode = "athletic_live_scoreboard";
         try {
           const data = await fetchAPI(`/api/mode_settings/${mode}`);
           const s = data.settings;
@@ -332,6 +336,186 @@
           .replace(/"/g, "&quot;");
       }
 
+      // ---------- Animation mode settings ----------
+
+      function formatBytes(n) {
+        if (n < 1024) return `${n} B`;
+        if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+        return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+      }
+
+      async function renderAnimationSettings(panel) {
+        // Don't overwrite existing inputs — they may contain unsaved edits
+        if (document.getElementById("anim-file")) return;
+        try {
+          const data = await fetchAPI("/api/mode_settings/animation_display");
+          const s = data.settings;
+          panel.innerHTML = `
+            <hr style="margin:12px 0; border-color:#eee;">
+            <h3 style="margin:0 0 10px;">Animation Settings</h3>
+            <div style="max-width:480px;">
+              <div class="form-group">
+                <label for="anim-file">Clip</label>
+                <select id="anim-file" style="width:100%;">
+                  <option value="">Loading…</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="anim-fit">Scaling</label>
+                <select id="anim-fit" style="width:100%;">
+                  <option value="contain">Contain — fit inside, letterboxed</option>
+                  <option value="cover">Cover — fill the panel, cropped</option>
+                  <option value="stretch">Stretch — ignore aspect ratio</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="anim-fps">Frame Rate (0 = use the clip's own timing)</label>
+                <input id="anim-fps" type="number" step="1" min="0" max="60"
+                       value="${Number(s.fps) || 0}" style="width:120px;">
+              </div>
+              <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                  <input id="anim-loop" type="checkbox" ${s.loop === false ? "" : "checked"}>
+                  Loop forever
+                </label>
+              </div>
+              <div style="margin-top:10px;">
+                <button onclick="saveAnimationSettings()" class="btn btn-secondary" style="margin-right:8px;">Save Settings</button>
+                <button onclick="deleteAnimation()" class="btn btn-secondary" style="margin-right:8px;">Delete Clip</button>
+                <span id="anim-save-status" style="font-size:13px; color:#7f8c8d;"></span>
+              </div>
+            </div>
+            <hr style="margin:12px 0; border-color:#eee;">
+            <h4 style="margin:0 0 8px; font-size:13px; color:#7f8c8d; text-transform:uppercase; letter-spacing:.05em;">Upload</h4>
+            <div style="max-width:480px;">
+              <input id="anim-upload" type="file"
+                     accept=".gif,.webp,.png,.apng,.mp4,.mov,.webm,.mkv,.m4v,.avi">
+              <button onclick="uploadAnimation()" class="btn btn-secondary" style="margin-left:8px;">Upload</button>
+              <div id="anim-upload-status" style="font-size:13px; color:#7f8c8d; margin-top:6px;"></div>
+              <p style="font-size:12px; color:#7f8c8d; margin:8px 0 0;">
+                GIF, APNG and WebP work out of the box. Video needs ffmpeg
+                installed on the Pi (<code>sudo apt install ffmpeg</code>).
+              </p>
+            </div>`;
+          document.getElementById("anim-fit").value = s.fit || "contain";
+          await refreshAnimationList(s.file || "");
+        } catch (err) {
+          panel.innerHTML = `<p style="color:#e74c3c;">Could not load settings: ${escapeHtml(err.message)}</p>`;
+        }
+      }
+
+      async function refreshAnimationList(selected) {
+        const select = document.getElementById("anim-file");
+        if (!select) return;
+        const keep = selected !== undefined ? selected : select.value;
+        try {
+          const data = await fetchAPI("/api/animations");
+          if (!data.animations.length) {
+            select.innerHTML = `<option value="">No clips uploaded yet</option>`;
+            return;
+          }
+          select.innerHTML = data.animations
+            .map(
+              (a) =>
+                `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)} (${formatBytes(a.size)})</option>`,
+            )
+            .join("");
+          if (keep) select.value = keep;
+          // A configured clip that no longer exists leaves the select blank;
+          // surface it rather than silently selecting something else.
+          if (!select.value && keep) {
+            select.insertAdjacentHTML(
+              "afterbegin",
+              `<option value="${escapeHtml(keep)}">${escapeHtml(keep)} (missing)</option>`,
+            );
+            select.value = keep;
+          }
+        } catch (err) {
+          select.innerHTML = `<option value="">Error: ${escapeHtml(err.message)}</option>`;
+        }
+      }
+
+      function collectAnimationSettings() {
+        const file = document.getElementById("anim-file")?.value || "";
+        return {
+          file,
+          fit: document.getElementById("anim-fit")?.value || "contain",
+          fps: parseFloat(document.getElementById("anim-fps")?.value) || 0,
+          loop: !!document.getElementById("anim-loop")?.checked,
+        };
+      }
+
+      async function saveAnimationSettings() {
+        const statusEl = document.getElementById("anim-save-status");
+        const settings = collectAnimationSettings();
+        if (!settings.file) {
+          showAlert("Select a clip first.", "error");
+          return;
+        }
+        statusEl.textContent = "Saving…";
+        try {
+          await postAPI("/api/mode_settings/animation_display", { settings });
+          statusEl.textContent = "Saved";
+          setTimeout(() => {
+            statusEl.textContent = "";
+          }, 3000);
+        } catch (err) {
+          showAlert(`Error saving settings: ${err.message}`, "error");
+          statusEl.textContent = "";
+        }
+      }
+
+      async function uploadAnimation() {
+        const input = document.getElementById("anim-upload");
+        const statusEl = document.getElementById("anim-upload-status");
+        const file = input?.files?.[0];
+        if (!file) {
+          showAlert("Choose a file to upload.", "error");
+          return;
+        }
+        statusEl.textContent = `Uploading ${file.name}…`;
+        const body = new FormData();
+        body.append("file", file);
+        try {
+          const response = await fetch("/api/upload/animation", {
+            method: "POST",
+            body,
+          });
+          const result = await response.json();
+          if (!response.ok)
+            throw new Error(result.error || `HTTP ${response.status}`);
+          statusEl.textContent = "";
+          input.value = "";
+          showAlert(
+            `${result.replaced ? "Replaced" : "Uploaded"} ${result.name}`,
+          );
+          await refreshAnimationList(result.name);
+        } catch (err) {
+          statusEl.textContent = "";
+          showAlert(`Upload failed: ${err.message}`, "error");
+        }
+      }
+
+      async function deleteAnimation() {
+        const select = document.getElementById("anim-file");
+        const name = select?.value;
+        if (!name) return;
+        if (!confirm(`Delete ${name}? This cannot be undone.`)) return;
+        try {
+          const response = await fetch(
+            `/api/animations/${encodeURIComponent(name)}`,
+            { method: "DELETE" },
+          );
+          const result = await response.json();
+          if (!response.ok)
+            throw new Error(result.error || `HTTP ${response.status}`);
+          showAlert(`Deleted ${result.name}`);
+          await refreshAnimationList("");
+        } catch (err) {
+          showAlert(`Delete failed: ${err.message}`, "error");
+        }
+      }
+
       async function applyModeSwitch() {
         const mode = _selectedMode || _activeMode;
         if (!mode) return;
@@ -357,6 +541,26 @@
             await postAPI(`/api/mode_settings/${mode}`, {
               settings: { name, uuid, interval },
             });
+          } catch (err) {
+            showAlert(`Error saving settings: ${err.message}`, "error");
+            statusEl.textContent = "";
+            return;
+          }
+        }
+
+        // Persist animation settings before switching
+        if (mode === "animation_display") {
+          const settings = collectAnimationSettings();
+          if (!settings.file) {
+            showAlert(
+              "Upload and select a clip before switching to Animation.",
+              "error",
+            );
+            statusEl.textContent = "";
+            return;
+          }
+          try {
+            await postAPI(`/api/mode_settings/${mode}`, { settings });
           } catch (err) {
             showAlert(`Error saving settings: ${err.message}`, "error");
             statusEl.textContent = "";

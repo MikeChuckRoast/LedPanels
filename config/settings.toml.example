@@ -46,6 +46,10 @@ fpp_port = 4048              # DDP port (default: 4048)
 # Sends frames directly to ColorLight controller via raw Ethernet (requires root/sudo on Linux)
 colorlight_enabled = true
 colorlight_interface = "eth0"  # Network interface name (e.g., eth0, enp0s3, wlan0)
+# Pause after each row is written, in milliseconds. Dominates ColorLight frame
+# time — a 128-row panel spends ~128ms per frame here, capping it near 7fps.
+# Lower it to speed up animation, but too low tears frames; tune on hardware.
+colorlight_row_delay_ms = 1.0
 
 [keyboard]
 # Keyboard input settings for event navigation
@@ -101,7 +105,7 @@ gpio_slowdown = 4            # GPIO slowdown for RGBMatrixOptions
 [manager]
 # display_manager.py — the process the systemd service starts. It hosts the
 # web UI and runs one display mode as a child process, restarting it on crash.
-active_mode = "display_event"   # display_event | athletic_live_scoreboard | udp_scoreboard
+active_mode = "display_event"   # display_event | athletic_live_scoreboard | udp_scoreboard | animation_display
 auto_restart = true             # Restart the display mode if it exits
 restart_backoff_sec = 5         # Seconds to wait before restarting
 
@@ -120,3 +124,14 @@ interval = 3.0                  # Poll interval in seconds
 font = "fonts/helvB14.bdf"      # BDF font
 
 [mode.udp_scoreboard]
+
+[mode.animation_display]
+# Plays a looping GIF or video clip. A bare filename resolves inside
+# config/animations/, which is where web UI uploads land; an absolute path is
+# also accepted. GIF/APNG/WebP need nothing extra, MP4/MOV/WebM need ffmpeg
+# on PATH ("sudo apt install ffmpeg").
+file = ""                       # Required before this mode can start
+fit = "contain"                 # contain (letterbox) | cover (crop) | stretch
+fps = 0                         # 0 keeps the source's own timing
+loop = true                     # Repeat forever vs. play once and exit
+background = "#000000"          # Fill behind letterboxing and transparency

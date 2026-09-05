@@ -20,10 +20,22 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import tomli_w
 from flask import Flask, jsonify, render_template, request, send_from_directory
+from werkzeug.exceptions import HTTPException
+from werkzeug.utils import secure_filename
 
+from animation_loader import SUPPORTED_EXTENSIONS, AnimationError, load_animation
 from event_parser import (load_affiliation_colors, parse_hex_color,
                           parse_lynx_file)
 from schedule_parser import parse_schedule, validate_schedule_entries
+
+# Cap on a single animation upload. Generous enough for a short clip, small
+# enough that a stray file cannot fill a Pi's SD card. Enforced by Flask via
+# MAX_CONTENT_LENGTH, which rejects the request before the body is buffered.
+MAX_ANIMATION_UPLOAD_BYTES = 64 * 1024 * 1024
+
+# Panel size used only to prove an upload decodes. The real playback size comes
+# from [hardware]; nothing here depends on matching it.
+_VALIDATION_SIZE = 64
 
 
 class WebServer:
@@ -66,6 +78,7 @@ class WebServer:
         self.app = Flask(__name__,
                         static_folder='static',
                         template_folder='templates')
+        self.app.config['MAX_CONTENT_LENGTH'] = MAX_ANIMATION_UPLOAD_BYTES
         self.server_thread = None
 
         # Register routes
@@ -172,6 +185,141 @@ class WebServer:
         @self.app.route('/api/athletic_live/board_config', methods=['GET'])
         def get_athletic_live_board_config():
             return self._get_athletic_live_board_config()
+
+        @self.app.route('/api/animations', methods=['GET'])
+        def list_animations():
+            return self._list_animations()
+
+        @self.app.route('/api/upload/animation', methods=['POST'])
+        def upload_animation():
+            return self._upload_animation()
+
+        @self.app.route('/api/animations/<name>', methods=['DELETE'])
+        def delete_animation(name):
+            return self._delete_animation(name)
+
+        @self.app.errorhandler(413)
+        def too_large(_err):
+            limit_mb = MAX_ANIMATION_UPLOAD_BYTES // (1024 * 1024)
+            return jsonify({'error': f'File too large (limit {limit_mb} MB)'}), 413
+
+    # -- Animations ----------------------------------------------------------
+
+    def _animations_dir(self) -> Path:
+        """Return the animations directory, creating it if needed."""
+        path = self.config_dir / "animations"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _resolve_animation(self, name: str) -> Optional[Path]:
+        """Map a user-supplied name to a path inside the animations directory.
+
+        Returns None if the name is unusable — an unsupported extension, or one
+        that escapes the directory. secure_filename already strips separators;
+        the containment check is a second line of defence for a path that
+        somehow still resolves outside.
+        """
+        safe = secure_filename(name or "")
+        if not safe or Path(safe).suffix.lower() not in SUPPORTED_EXTENSIONS:
+            return None
+        directory = self._animations_dir()
+        candidate = (directory / safe).resolve()
+        if candidate.parent != directory.resolve():
+            return None
+        return candidate
+
+    def _list_animations(self) -> Tuple[Dict, int]:
+        """List uploaded animation files."""
+        try:
+            entries = []
+            for path in sorted(self._animations_dir().iterdir()):
+                if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                    continue
+                stat = path.stat()
+                entries.append({
+                    'name': path.name,
+                    'size': stat.st_size,
+                    'modified': stat.st_mtime,
+                })
+            return jsonify({'animations': entries}), 200
+        except Exception as e:
+            logging.error(f"Error listing animations: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    def _upload_animation(self) -> Tuple[Dict, int]:
+        """Accept a multipart animation upload.
+
+        Unlike the lynx.evt/lynx.sch uploads this takes multipart rather than a
+        JSON string field, because the payload is binary and a base64 round trip
+        would inflate a video by a third.
+        """
+        try:
+            upload = request.files.get('file')
+            if upload is None or not upload.filename:
+                return jsonify({'error': 'Missing file field'}), 400
+
+            target = self._resolve_animation(upload.filename)
+            if target is None:
+                supported = ', '.join(sorted(SUPPORTED_EXTENSIONS))
+                return jsonify({
+                    'error': f"Unsupported or invalid filename '{upload.filename}'. "
+                             f"Supported types: {supported}"
+                }), 400
+
+            # Stage in a subdirectory rather than beside the target: the
+            # listing skips directories, so a half-written or undecodable file
+            # is never visible, and the staged name keeps its real extension,
+            # which is what load_animation dispatches on.
+            staging = self._animations_dir() / ".staging"
+            staging.mkdir(exist_ok=True)
+            temp_file = staging / target.name
+            try:
+                upload.save(str(temp_file))
+
+                try:
+                    load_animation(temp_file, _VALIDATION_SIZE, _VALIDATION_SIZE,
+                                   max_frames=1)
+                except AnimationError as e:
+                    return jsonify({'error': f'Could not decode animation: {e}'}), 400
+
+                replaced = target.exists()
+                shutil.move(str(temp_file), str(target))
+                logging.info("%s animation: %s (%d bytes)",
+                             "Replaced" if replaced else "Uploaded",
+                             target.name, target.stat().st_size)
+                return jsonify({
+                    'success': True,
+                    'name': target.name,
+                    'size': target.stat().st_size,
+                    'replaced': replaced,
+                }), 200
+            finally:
+                if temp_file.exists():
+                    temp_file.unlink()
+
+        except HTTPException:
+            # Flask raises RequestEntityTooLarge from request.files when the
+            # body exceeds MAX_CONTENT_LENGTH. Let it through to the 413
+            # handler rather than reporting it as a server error.
+            raise
+        except Exception as e:
+            logging.error(f"Error uploading animation: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    def _delete_animation(self, name: str) -> Tuple[Dict, int]:
+        """Delete an uploaded animation file."""
+        try:
+            target = self._resolve_animation(name)
+            if target is None:
+                return jsonify({'error': f"Invalid animation name '{name}'"}), 400
+            if not target.exists():
+                return jsonify({'error': f"Animation '{target.name}' not found"}), 404
+            target.unlink()
+            logging.info("Deleted animation: %s", target.name)
+            return jsonify({'success': True, 'name': target.name}), 200
+        except Exception as e:
+            logging.error(f"Error deleting animation: {e}")
+            return jsonify({'error': str(e)}), 500
 
     def _get_athletic_live_board_config(self):
         """Fetch live board config from the AthleticLIVE API."""

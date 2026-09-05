@@ -627,3 +627,180 @@ class TestDisplayPowerAPI:
                                   data=json.dumps({'power': False}),
                                   content_type='application/json')
             assert response.status_code == 503
+
+
+class TestAnimationEndpoints:
+    """Tests for the animation upload/list/delete API."""
+
+    @staticmethod
+    def _server(config_dir, port=5100):
+        from web_server import WebServer
+        return WebServer(str(config_dir), host="127.0.0.1", port=port)
+
+    @staticmethod
+    def _gif_bytes(frames=2, size=(8, 8)):
+        import io
+
+        from PIL import Image
+        images = [Image.new("RGB", size, (i * 60, 0, 0)) for i in range(frames)]
+        buffer = io.BytesIO()
+        images[0].save(buffer, format="GIF", save_all=True,
+                       append_images=images[1:], duration=100, loop=0)
+        return buffer.getvalue()
+
+    def _upload(self, client, filename, payload):
+        import io
+        return client.post(
+            '/api/upload/animation',
+            data={'file': (io.BytesIO(payload), filename)},
+            content_type='multipart/form-data',
+        )
+
+    def test_list_is_empty_before_any_upload(self, populated_config_dir):
+        server = self._server(populated_config_dir)
+
+        with server.app.test_client() as client:
+            response = client.get('/api/animations')
+
+            assert response.status_code == 200
+            assert json.loads(response.data)['animations'] == []
+
+    def test_uploads_a_gif_and_lists_it(self, populated_config_dir):
+        server = self._server(populated_config_dir)
+
+        with server.app.test_client() as client:
+            response = self._upload(client, 'logo.gif', self._gif_bytes())
+            assert response.status_code == 200
+            body = json.loads(response.data)
+            assert body['name'] == 'logo.gif'
+            assert body['replaced'] is False
+
+            listed = json.loads(client.get('/api/animations').data)['animations']
+            assert [a['name'] for a in listed] == ['logo.gif']
+            assert listed[0]['size'] > 0
+
+        assert (populated_config_dir / "animations" / "logo.gif").exists()
+
+    def test_reupload_reports_a_replacement(self, populated_config_dir):
+        server = self._server(populated_config_dir)
+
+        with server.app.test_client() as client:
+            self._upload(client, 'logo.gif', self._gif_bytes(frames=2))
+            response = self._upload(client, 'logo.gif', self._gif_bytes(frames=4))
+
+            assert response.status_code == 200
+            assert json.loads(response.data)['replaced'] is True
+
+    def test_missing_file_field_is_rejected(self, populated_config_dir):
+        server = self._server(populated_config_dir)
+
+        with server.app.test_client() as client:
+            response = client.post('/api/upload/animation', data={},
+                                   content_type='multipart/form-data')
+
+            assert response.status_code == 400
+            assert 'Missing file field' in json.loads(response.data)['error']
+
+    def test_unsupported_extension_is_rejected(self, populated_config_dir):
+        server = self._server(populated_config_dir)
+
+        with server.app.test_client() as client:
+            response = self._upload(client, 'notes.txt', b'hello')
+
+            assert response.status_code == 400
+            assert '.gif' in json.loads(response.data)['error']
+
+    def test_undecodable_file_is_rejected_and_not_kept(self, populated_config_dir):
+        server = self._server(populated_config_dir)
+
+        with server.app.test_client() as client:
+            response = self._upload(client, 'broken.gif', b'not really a gif')
+
+            assert response.status_code == 400
+            assert 'Could not decode' in json.loads(response.data)['error']
+
+            assert json.loads(client.get('/api/animations').data)['animations'] == []
+
+        # Neither the staged copy nor the target may survive a bad upload.
+        # (.staging itself remains, empty.)
+        animations = populated_config_dir / "animations"
+        assert [p for p in animations.rglob("*") if p.is_file()] == []
+
+    def test_traversal_filename_stays_inside_the_animations_directory(
+            self, populated_config_dir):
+        server = self._server(populated_config_dir)
+
+        with server.app.test_client() as client:
+            response = self._upload(client, '../../evil.gif', self._gif_bytes())
+
+            assert response.status_code == 200
+            assert json.loads(response.data)['name'] == 'evil.gif'
+
+        assert (populated_config_dir / "animations" / "evil.gif").exists()
+        assert not (populated_config_dir.parent / "evil.gif").exists()
+
+    def test_traversal_onto_a_config_file_is_rejected_by_extension(
+            self, populated_config_dir):
+        server = self._server(populated_config_dir)
+        original = (populated_config_dir / "lynx.evt").read_bytes()
+
+        with server.app.test_client() as client:
+            response = self._upload(client, '../lynx.evt', b'clobbered')
+
+            assert response.status_code == 400
+
+        assert (populated_config_dir / "lynx.evt").read_bytes() == original
+
+    def test_deletes_an_uploaded_clip(self, populated_config_dir):
+        server = self._server(populated_config_dir)
+
+        with server.app.test_client() as client:
+            self._upload(client, 'logo.gif', self._gif_bytes())
+            response = client.delete('/api/animations/logo.gif')
+
+            assert response.status_code == 200
+            assert json.loads(response.data)['name'] == 'logo.gif'
+            assert json.loads(client.get('/api/animations').data)['animations'] == []
+
+    def test_deleting_a_missing_clip_is_a_404(self, populated_config_dir):
+        server = self._server(populated_config_dir)
+
+        with server.app.test_client() as client:
+            response = client.delete('/api/animations/nothing.gif')
+
+            assert response.status_code == 404
+
+    def test_deleting_an_unsupported_name_is_rejected(self, populated_config_dir):
+        server = self._server(populated_config_dir)
+
+        with server.app.test_client() as client:
+            response = client.delete('/api/animations/settings.toml')
+
+            assert response.status_code == 400
+
+    def test_upload_size_is_capped(self, populated_config_dir):
+        from web_server import MAX_ANIMATION_UPLOAD_BYTES
+        server = self._server(populated_config_dir)
+
+        assert server.app.config['MAX_CONTENT_LENGTH'] == MAX_ANIMATION_UPLOAD_BYTES
+
+    def test_oversized_upload_returns_413_json(self, populated_config_dir):
+        server = self._server(populated_config_dir)
+        server.app.config['MAX_CONTENT_LENGTH'] = 128
+
+        with server.app.test_client() as client:
+            response = self._upload(client, 'big.gif', b'x' * 4096)
+
+            assert response.status_code == 413
+            assert 'too large' in json.loads(response.data)['error'].lower()
+
+    def test_listing_ignores_unrelated_files(self, populated_config_dir):
+        server = self._server(populated_config_dir)
+        animations = populated_config_dir / "animations"
+        animations.mkdir(exist_ok=True)
+        (animations / "README.txt").write_text("not a clip")
+
+        with server.app.test_client() as client:
+            listed = json.loads(client.get('/api/animations').data)['animations']
+
+        assert listed == []

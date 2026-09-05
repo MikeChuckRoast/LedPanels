@@ -77,6 +77,52 @@ class FPPMatrix:
         if 0 <= x < self.width and 0 <= y < self.height:
             self.buffer[y][x] = [r, g, b]
 
+    def SetImage(self, image, offset_x: int = 0, offset_y: int = 0):
+        """Blit a PIL image into the frame buffer in a single operation.
+
+        Mirrors the method of the same name on the hzeller rgbmatrix canvas and
+        on RGBMatrixEmulator, so callers can blit without knowing which backend
+        get_matrix_backend() handed them.
+
+        The alternative — a SetPixel per pixel — costs one Python call each, or
+        16k calls for a 128x128 panel. That is tens of milliseconds per frame on
+        a Pi, which matters for animation but not for the text modes.
+
+        Parts of the image falling outside the panel are clipped.
+        """
+        src_w, src_h = image.size
+
+        # Intersect the image with the panel, in image coordinates.
+        x0 = max(0, -offset_x)
+        y0 = max(0, -offset_y)
+        x1 = min(src_w, self.width - offset_x)
+        y1 = min(src_h, self.height - offset_y)
+        if x0 >= x1 or y0 >= y1:
+            return
+
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        if (x0, y0, x1, y1) != (0, 0, src_w, src_h):
+            image = image.crop((x0, y0, x1, y1))
+
+        w = x1 - x0
+        h = y1 - y0
+        dst_x = offset_x + x0
+        dst_y = offset_y + y0
+        raw = image.tobytes()
+
+        # Both the buffer and PIL are RGB here, so this is a straight copy.
+        if NUMPY_AVAILABLE:
+            arr = np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 3)
+            self.buffer[dst_y:dst_y + h, dst_x:dst_x + w] = arr
+        else:
+            for row in range(h):
+                base = row * w * 3
+                dst_row = self.buffer[dst_y + row]
+                for col in range(w):
+                    p = base + col * 3
+                    dst_row[dst_x + col] = [raw[p], raw[p + 1], raw[p + 2]]
+
     def SwapOnVSync(self, canvas):
         """Send the buffer to FPP via DDP protocol.
 

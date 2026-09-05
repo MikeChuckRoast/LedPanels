@@ -149,9 +149,10 @@ fi
 say "Verifying"
 "$VENV_PY" - <<'PY'
 import importlib.util
+import shutil
 import sys
 
-required = ["flask", "watchdog", "PIL", "tomli_w", "requests", "bdflib", "tomllib"]
+required = ["flask", "watchdog", "PIL", "tomli_w", "requests", "bdflib", "numpy", "tomllib"]
 missing = [m for m in required if importlib.util.find_spec(m) is None]
 if missing:
     print("    MISSING: " + ", ".join(missing))
@@ -165,6 +166,14 @@ if importlib.util.find_spec("evdev") is None:
     print("    Install with: sudo apt install python3-evdev")
 else:
     print("    evdev OK: keyboard navigation available")
+
+# Optional. ffmpeg decodes video for animation_display; GIF playback goes
+# through Pillow and needs nothing extra.
+if shutil.which("ffmpeg") is None:
+    print("    ffmpeg not found — animation_display can play GIFs but not video.")
+    print("    Install with: sudo apt install ffmpeg")
+else:
+    print("    ffmpeg OK: animation_display can play video")
 PY
 
 say "Done"

@@ -47,6 +47,18 @@ except AttributeError:
     logging.warning("AF_PACKET not available (Windows?). ColorLight backend requires Linux/Unix.")
 
 
+# Pause after each row frame is written to the raw socket, in milliseconds.
+#
+# PyLights uses 1ms and this hardware was commissioned against that value, so it
+# stays the default. It dominates the frame time: a 128-row panel spends ~128ms
+# per frame sleeping, capping the panel at roughly 7fps regardless of how fast
+# the frame was rendered. Lowering it is the only way to get a higher frame rate
+# out of ColorLight, but too low a value overruns the card and produces torn or
+# dropped frames — the safe value is hardware-specific, so it is exposed as
+# [network].colorlight_row_delay_ms rather than guessed at here.
+DEFAULT_ROW_DELAY_MS = 1.0
+
+
 class ColorLightMatrix:
     """ColorLight 5A-75B matrix backend using raw Ethernet frames."""
 
@@ -61,13 +73,15 @@ class ColorLightMatrix:
     DST_MAC = b'\x11\x22\x33\x44\x55\x66'
     SRC_MAC = b'\x22\x22\x33\x44\x55\x66'
 
-    def __init__(self, interface: str, width: int, height: int):
+    def __init__(self, interface: str, width: int, height: int,
+                 row_delay_ms: float = DEFAULT_ROW_DELAY_MS):
         """Initialize ColorLight backend.
 
         Args:
             interface: Network interface name (e.g., 'eth0', 'enp0s3')
             width: Display width in pixels
             height: Display height in pixels
+            row_delay_ms: Pause after each row frame — see DEFAULT_ROW_DELAY_MS
         """
         if not RAW_SOCKET_AVAILABLE:
             raise RuntimeError(
@@ -78,6 +92,7 @@ class ColorLightMatrix:
         self.interface = interface
         self.width = int(width)
         self.height = int(height)
+        self.row_delay_sec = max(0.0, float(row_delay_ms)) / 1000.0
 
         # Create raw socket and bind to interface
         try:
@@ -118,7 +133,8 @@ class ColorLightMatrix:
             for row_num in range(self.height):
                 frame = self._build_data_frame(row_num, blank_row, offset=0)
                 self.sock.send(frame)
-                _time.sleep(0.001)
+                if self.row_delay_sec:
+                    _time.sleep(self.row_delay_sec)
             self._send_init_frames()
         logging.debug("ColorLight cold-boot priming complete (6 blank frames sent)")
 
@@ -165,6 +181,52 @@ class ColorLightMatrix:
                 self.buffer[y, x, 2] = int(r)  # Red
             else:
                 self.buffer[y][x] = [int(b), int(g), int(r)]  # BGR order
+
+    def SetImage(self, image, offset_x: int = 0, offset_y: int = 0):
+        """Blit a PIL image into the frame buffer in a single operation.
+
+        Mirrors the method of the same name on the hzeller rgbmatrix canvas and
+        on RGBMatrixEmulator, so callers can blit without knowing which backend
+        get_matrix_backend() handed them.
+
+        The alternative — a SetPixel per pixel — costs one Python call each, or
+        16k calls for a 128x128 panel. That is tens of milliseconds per frame on
+        a Pi, which matters for animation but not for the text modes.
+
+        Parts of the image falling outside the panel are clipped.
+        """
+        src_w, src_h = image.size
+
+        # Intersect the image with the panel, in image coordinates.
+        x0 = max(0, -offset_x)
+        y0 = max(0, -offset_y)
+        x1 = min(src_w, self.width - offset_x)
+        y1 = min(src_h, self.height - offset_y)
+        if x0 >= x1 or y0 >= y1:
+            return
+
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        if (x0, y0, x1, y1) != (0, 0, src_w, src_h):
+            image = image.crop((x0, y0, x1, y1))
+
+        w = x1 - x0
+        h = y1 - y0
+        dst_x = offset_x + x0
+        dst_y = offset_y + y0
+        raw = image.tobytes()
+
+        # The buffer holds BGR; PIL hands us RGB.
+        if NUMPY_AVAILABLE:
+            arr = np.frombuffer(raw, dtype=np.uint8).reshape(h, w, 3)
+            self.buffer[dst_y:dst_y + h, dst_x:dst_x + w] = arr[:, :, ::-1]
+        else:
+            for row in range(h):
+                base = row * w * 3
+                dst_row = self.buffer[dst_y + row]
+                for col in range(w):
+                    p = base + col * 3
+                    dst_row[dst_x + col] = [raw[p + 2], raw[p + 1], raw[p]]
 
     def _build_data_frame(self, row_num: int, pixel_data: bytes, offset: int = 0) -> bytes:
         """Build a ColorLight data frame for one row.
@@ -229,7 +291,8 @@ class ColorLightMatrix:
                 sent = self.sock.send(frame)
                 frame_count += 1
                 bytes_sent += sent
-                time.sleep(0.001)  # 1ms delay between frames (same as PyLights)
+                if self.row_delay_sec:
+                    time.sleep(self.row_delay_sec)
 
                 # Debug first few rows
                 if row_num < 3:
@@ -429,13 +492,15 @@ class ColorLightGraphics:
                 y += sy
 
 
-def create_colorlight_backend(interface: str, width: int, height: int):
+def create_colorlight_backend(interface: str, width: int, height: int,
+                              row_delay_ms: float = DEFAULT_ROW_DELAY_MS):
     """Create a ColorLight backend factory.
 
     Args:
         interface: Network interface name (e.g., 'eth0', 'enp0s3')
         width: Display width in pixels (individual panel width)
         height: Display height in pixels (individual panel height)
+        row_delay_ms: Pause after each row frame — see DEFAULT_ROW_DELAY_MS
 
     Returns:
         Tuple of (factory, options_class, graphics_class)
@@ -454,5 +519,5 @@ def create_colorlight_backend(interface: str, width: int, height: int):
         else:
             w = width
             h = height
-        return ColorLightMatrix(interface, w, h)
+        return ColorLightMatrix(interface, w, h, row_delay_ms=row_delay_ms)
     return factory, ColorLightOptions, ColorLightGraphics
