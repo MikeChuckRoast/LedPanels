@@ -6,7 +6,7 @@ Central process manager for LED display modes.
 
 Launched by the systemd service (led-display.service) instead of any
 individual display script.  Responsibilities:
-  - Hosts the shared web UI / API on port 5000
+  - Hosts the shared web UI / API on port 80
   - Starts the configured display mode as a child process
   - Monitors the child and restarts it on crash (if auto_restart=true)
   - Responds to mode-switch requests from the web UI by stopping the
@@ -364,11 +364,11 @@ def main():
         web_cfg = settings.get("web", {})
         web_enabled = web_cfg.get("web_enabled", True)
         web_host = web_cfg.get("web_host", "0.0.0.0")
-        web_port = web_cfg.get("web_port", 5000)
+        web_port = web_cfg.get("web_port", 80)
     except ConfigError:
         web_enabled = True
         web_host = "0.0.0.0"
-        web_port = 5000
+        web_port = 80
 
     if web_enabled:
         start_web_server(

@@ -1008,7 +1008,7 @@ def setup_peripherals(settings, config_dir, args_keyboard_device, state, no_web=
     web_server = None
     if not no_web and settings.get('web', {}).get('web_enabled', False):
         web_host = settings.get('web', {}).get('web_host', '0.0.0.0')
-        web_port = settings.get('web', {}).get('web_port', 5000)
+        web_port = settings.get('web', {}).get('web_port', 80)
         web_server = start_web_server(config_dir, web_host, web_port,
                                       get_display_power=state.get_display_power,
                                       set_display_power=state.set_display_power)

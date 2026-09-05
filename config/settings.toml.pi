@@ -60,11 +60,14 @@ poll_interval = 1.0          # Polling interval in seconds (fallback mode only)
 
 [web]
 # Web interface for remote control and configuration
-# Access from any browser on the network: http://<raspberry-pi-ip>:5000
+# Access from any browser on the network: http://<raspberry-pi-ip>
 # Provides pages for viewing/changing current event, editing team colors, and adjusting display settings
 web_enabled = true           # Enable web interface
 web_host = "0.0.0.0"          # Host to bind to (0.0.0.0 = all interfaces, 127.0.0.1 = localhost only)
-web_port = 5000              # Port for web server (default HTTP alternative: 5000)
+# Port 80 needs root, which the service already has for raw Ethernet. Nothing
+# else on a stock Pi OS image listens there, but FPP and lighttpd both claim it —
+# check with `sudo ss -ltnp | grep ':80 '` before assuming this port is free.
+web_port = 80                # Port for web server
 
 [scoreboard]
 # UDP scoreboard display settings (separate from main display)

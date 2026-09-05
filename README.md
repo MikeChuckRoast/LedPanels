@@ -33,7 +33,7 @@ systemd service starts, and it is the only process you normally launch by hand.
 
 ```
 display_manager.py
-├── web_server.py ................ Flask UI + REST API on port 5000
+├── web_server.py ................ Flask UI + REST API on port 80
 └── one child process, restarted on crash and on mode switch:
     ├── display_event.py .................. Lynx starting roster
     ├── athletic_live_scoreboard.py ....... AthleticLIVE field scoreboard
@@ -47,7 +47,7 @@ new one. If a child exits and `auto_restart` is on, the manager restarts it afte
 
 The child modes are ordinary scripts and can be run standalone for debugging —
 just don't run one alongside the manager, or two processes will fight over the
-panel and port 5000.
+panel and the web port.
 
 Shared modules: [`config_loader.py`](config_loader.py) (settings and validation),
 [`event_parser.py`](event_parser.py) (Lynx `.evt` parsing, team colours),
@@ -81,8 +81,9 @@ cp config/settings.toml.example config/settings.toml
 python display_manager.py --config-dir ./config
 ```
 
-Then open `http://localhost:5000` — or `http://<pi-ip>:5000` from another
-machine — and pick a display mode.
+Then open `http://localhost` — or `http://<pi-ip>` from another machine — and
+pick a display mode. Port 80 needs root; run without it and the bind fails, so
+set `[web].web_port` to something above 1024 for unprivileged local testing.
 
 ---
 
@@ -328,7 +329,7 @@ font_name = "helvB14.bdf"
 [web]
 web_enabled = true
 web_host = "0.0.0.0"      # 127.0.0.1 to restrict to the Pi itself
-web_port = 5000
+web_port = 80             # needs root; use >1024 when running unprivileged
 
 [manager]
 active_mode = "athletic_live_scoreboard"
@@ -391,7 +392,7 @@ Gitignored: `settings.toml` (local paths), `current_event.json` (runtime state),
 ## Web Interface
 
 [`web_server.py`](web_server.py) serves a Flask UI and REST API, started by the
-manager on port 5000. There is **no authentication** — keep it on a trusted
+manager on port 80. There is **no authentication** — keep it on a trusted
 network, or bind `web_host` to `127.0.0.1`.
 
 | URL | Purpose |
@@ -507,7 +508,7 @@ rather than `python`:
 sudo .venv/bin/python tools/clear_display.py
 .venv/bin/python tools/display_image.py --image logo.png --out preview.png
 .venv/bin/python tools/update_team_colors.py config/
-.venv/bin/python tools/upload_events.py --server-url http://192.168.1.50:5000 \
+.venv/bin/python tools/upload_events.py --server-url http://192.168.1.50 \
   --events-file config/lynx.evt --schedule-file config/lynx.sch --combined
 sudo .venv/bin/python tools/test_keyboard.py
 ```

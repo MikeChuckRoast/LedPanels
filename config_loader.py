@@ -110,7 +110,7 @@ poll_interval = 1.0          # Polling interval in seconds (fallback mode only)
 # Web interface for remote control and configuration
 web_enabled = true           # Enable web interface
 web_host = "0.0.0.0"          # Host to bind to (0.0.0.0 = all interfaces)
-web_port = 5000              # Port for web server
+web_port = 80                # Port for web server (the service runs as root, so <1024 binds)
 
 [scoreboard]
 # UDP scoreboard display settings (separate from main display)

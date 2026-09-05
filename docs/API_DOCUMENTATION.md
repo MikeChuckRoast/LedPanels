@@ -4,9 +4,9 @@ This document describes the HTTP API endpoints for controlling the LED display s
 
 ## Base URL
 
-All endpoints are relative to the web server base URL. By default, the server runs on `http://localhost:5000`, but this can be configured.
+All endpoints are relative to the web server base URL. By default, the server runs on `http://localhost`, but this can be configured.
 
-Example: `http://localhost:5000/api/current_event`
+Example: `http://localhost/api/current_event`
 
 ## Authentication
 
@@ -96,7 +96,7 @@ Invalid types (400):
 
 **Example with cURL:**
 ```bash
-curl -X POST http://localhost:5000/api/current_event \
+curl -X POST http://localhost/api/current_event \
   -H "Content-Type: application/json" \
   -d '{"event": 3, "round": 1, "heat": 2}'
 ```
@@ -105,7 +105,7 @@ curl -X POST http://localhost:5000/api/current_event \
 ```python
 import requests
 
-url = "http://localhost:5000/api/current_event"
+url = "http://localhost/api/current_event"
 data = {
     "event": 3,
     "round": 1,
@@ -229,7 +229,7 @@ No valid events (400):
 ```python
 import requests
 
-url = "http://localhost:5000/api/upload/events"
+url = "http://localhost/api/upload/events"
 
 # Read file content
 with open("lynx.evt", "r", encoding="utf-8") as f:
@@ -354,7 +354,7 @@ Cannot load events for validation (500):
 ```python
 import requests
 
-url = "http://localhost:5000/api/upload/schedule"
+url = "http://localhost/api/upload/schedule"
 
 # Read file content
 with open("lynx.sch", "r", encoding="utf-8") as f:
@@ -471,7 +471,7 @@ No valid data (400):
 ```python
 import requests
 
-url = "http://localhost:5000/api/upload/combined"
+url = "http://localhost/api/upload/combined"
 
 # Read both files
 with open("lynx.evt", "r", encoding="utf-8") as f:
@@ -560,7 +560,7 @@ def set_current_event(server_url, event, round_num, heat):
     return True
 
 if __name__ == "__main__":
-    SERVER_URL = "http://localhost:5000"
+    SERVER_URL = "http://localhost"
     
     # Upload files
     if not upload_files(SERVER_URL, "lynx.evt", "lynx.sch"):
@@ -623,7 +623,7 @@ To test the API endpoints:
 
 ## Network Configuration
 
-By default, the web server binds to `0.0.0.0:5000` (accessible from any network interface). To restrict access:
+By default, the web server binds to `0.0.0.0:80` (accessible from any network interface). To restrict access:
 
 1. Edit `settings.toml`
 2. Change host to `127.0.0.1` (localhost only)

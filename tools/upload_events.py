@@ -7,22 +7,22 @@ web server using the file upload API endpoints.
 
 Usage:
     # Upload both files separately
-    python upload_events.py --server-url http://localhost:5000 \
+    python upload_events.py --server-url http://localhost \
         --events-file config/lynx.evt \
         --schedule-file config/lynx.sch
 
     # Upload both files atomically (recommended)
-    python upload_events.py --server-url http://localhost:5000 \
+    python upload_events.py --server-url http://localhost \
         --events-file config/lynx.evt \
         --schedule-file config/lynx.sch \
         --combined
 
     # Upload only events file
-    python upload_events.py --server-url http://localhost:5000 \
+    python upload_events.py --server-url http://localhost \
         --events-file config/lynx.evt
 
     # Upload only schedule file
-    python upload_events.py --server-url http://localhost:5000 \
+    python upload_events.py --server-url http://localhost \
         --schedule-file config/lynx.sch
 """
 
@@ -67,7 +67,7 @@ def upload_events(server_url: str, events_file: str) -> bool:
     """Upload events file to server.
 
     Args:
-        server_url: Base URL of web server (e.g., http://localhost:5000)
+        server_url: Base URL of web server (e.g., http://localhost)
         events_file: Path to lynx.evt file
 
     Returns:
@@ -114,7 +114,7 @@ def upload_schedule(server_url: str, schedule_file: str) -> bool:
     """Upload schedule file to server.
 
     Args:
-        server_url: Base URL of web server (e.g., http://localhost:5000)
+        server_url: Base URL of web server (e.g., http://localhost)
         schedule_file: Path to lynx.sch file
 
     Returns:
@@ -165,7 +165,7 @@ def upload_combined(server_url: str, events_file: str, schedule_file: str) -> bo
     """Upload both files atomically to server.
 
     Args:
-        server_url: Base URL of web server (e.g., http://localhost:5000)
+        server_url: Base URL of web server (e.g., http://localhost)
         events_file: Path to lynx.evt file
         schedule_file: Path to lynx.sch file
 
@@ -234,22 +234,22 @@ def main():
         epilog="""
 Examples:
   # Upload both files atomically (recommended)
-  %(prog)s --server-url http://localhost:5000 \\
+  %(prog)s --server-url http://localhost \\
     --events-file config/lynx.evt \\
     --schedule-file config/lynx.sch \\
     --combined
 
   # Upload both files separately
-  %(prog)s --server-url http://localhost:5000 \\
+  %(prog)s --server-url http://localhost \\
     --events-file config/lynx.evt \\
     --schedule-file config/lynx.sch
 
   # Upload only events
-  %(prog)s --server-url http://localhost:5000 \\
+  %(prog)s --server-url http://localhost \\
     --events-file config/lynx.evt
 
   # Upload only schedule
-  %(prog)s --server-url http://localhost:5000 \\
+  %(prog)s --server-url http://localhost \\
     --schedule-file config/lynx.sch
         """
     )
@@ -257,7 +257,7 @@ Examples:
     parser.add_argument(
         '--server-url',
         required=True,
-        help='Base URL of web server (e.g., http://localhost:5000)'
+        help='Base URL of web server (e.g., http://localhost)'
     )
 
     parser.add_argument(

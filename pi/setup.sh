@@ -181,4 +181,4 @@ else
 fi
 
 IP_ADDR="$(hostname -I 2>/dev/null | awk '{print $1}')"
-info "Web UI:         http://${IP_ADDR:-<pi-ip>}:5000"
+info "Web UI:         http://${IP_ADDR:-<pi-ip>}"

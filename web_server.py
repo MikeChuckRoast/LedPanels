@@ -29,7 +29,7 @@ from schedule_parser import parse_schedule, validate_schedule_entries
 class WebServer:
     """Web server for LED display control interface."""
 
-    def __init__(self, config_dir: str, host: str = "0.0.0.0", port: int = 5000,
+    def __init__(self, config_dir: str, host: str = "0.0.0.0", port: int = 80,
                  get_display_power=None, set_display_power=None,
                  # Manager callbacks — all optional; 501 returned when absent
                  get_active_mode=None, set_active_mode=None,
@@ -950,7 +950,7 @@ class WebServer:
         logging.info("Web server stopping (note: Flask server will continue until main process exits)")
 
 
-def start_web_server(config_dir: str, host: str = "0.0.0.0", port: int = 5000,
+def start_web_server(config_dir: str, host: str = "0.0.0.0", port: int = 80,
                      get_display_power=None, set_display_power=None,
                      get_active_mode=None, set_active_mode=None,
                      get_mode_status=None,
