@@ -218,10 +218,15 @@ class ModeProcess:
         self._proc = None
 
     def poll(self) -> Optional[int]:
-        """Return exit code if child has exited, None if still running."""
+        """Return exit code once when the child has newly exited, else None.
+
+        Edge-triggered: after a child exit is reported, later calls return
+        None (not the stale exit code) until a new process is started, so
+        the caller doesn't re-report the same exit forever.
+        """
         with self._lock:
             if self._proc is None:
-                return self._exit_code
+                return None
             ret = self._proc.poll()
             if ret is not None:
                 self._exit_code = ret
