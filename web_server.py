@@ -14,16 +14,17 @@ import os
 import re
 import shutil
 import threading
-import tomllib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import tomli_w
 from flask import Flask, jsonify, render_template, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
 from animation_loader import SUPPORTED_EXTENSIONS, AnimationError, load_animation
+from config_loader import (VALID_MODES, ConfigError, load_mode_config,
+                           normalize_mode_config, resolve_colors_path,
+                           resolve_lynx_path, save_mode_config)
 from event_parser import (load_affiliation_colors, parse_hex_color,
                           parse_lynx_file)
 from schedule_parser import parse_schedule, validate_schedule_entries
@@ -88,6 +89,14 @@ class WebServer:
         log = logging.getLogger('werkzeug')
         log.setLevel(logging.WARNING)
 
+    def _lynx_path(self) -> Path:
+        """Event file named by [mode.display_event].lynx_file."""
+        return resolve_lynx_path(str(self.config_dir))
+
+    def _colors_path(self) -> Path:
+        """Team colors file named by [files].colors_file."""
+        return resolve_colors_path(str(self.config_dir))
+
     def _register_routes(self):
         """Register all Flask routes."""
 
@@ -124,14 +133,6 @@ class WebServer:
         @self.app.route('/api/teams', methods=['POST'])
         def set_teams():
             return self._set_teams()
-
-        @self.app.route('/api/display_settings', methods=['GET'])
-        def get_display_settings():
-            return self._get_display_settings()
-
-        @self.app.route('/api/display_settings', methods=['POST'])
-        def set_display_settings():
-            return self._set_display_settings()
 
         @self.app.route('/api/teams/add_missing', methods=['POST'])
         def add_missing_teams():
@@ -351,7 +352,7 @@ class WebServer:
             JSON response with events list and status code
         """
         try:
-            lynx_file = self.config_dir / "lynx.evt"
+            lynx_file = self._lynx_path()
             events = parse_lynx_file(str(lynx_file))
 
             # Try to load schedule for ordering
@@ -487,7 +488,7 @@ class WebServer:
             JSON response with teams list and status code
         """
         try:
-            colors_file = self.config_dir / "colors.csv"
+            colors_file = self._colors_path()
             teams = []
 
             with open(colors_file, 'r', encoding='utf-8') as f:
@@ -541,7 +542,7 @@ class WebServer:
                         return jsonify({'error': f'Team {i} ({team["affiliation"]}): Invalid {color_field}: {e}'}), 400
 
             # Write to CSV file
-            colors_file = self.config_dir / "colors.csv"
+            colors_file = self._colors_path()
             with open(colors_file, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=['affiliation', 'name', 'bgcolor', 'text'])
                 writer.writeheader()
@@ -564,8 +565,8 @@ class WebServer:
             JSON response with count of teams added and status code
         """
         try:
-            lynx_file = self.config_dir / "lynx.evt"
-            colors_file = self.config_dir / "colors.csv"
+            lynx_file = self._lynx_path()
+            colors_file = self._colors_path()
 
             # Check if lynx.evt exists
             if not lynx_file.exists():
@@ -631,124 +632,6 @@ class WebServer:
             logging.error(f"Error adding missing teams: {e}")
             return jsonify({'error': str(e)}), 500
 
-    def _get_display_settings(self) -> Tuple[Dict, int]:
-        """Get display settings from settings.toml.
-
-        Returns:
-            JSON response with display settings and status code
-        """
-        try:
-            settings_file = self.config_dir / "settings.toml"
-            with open(settings_file, 'rb') as f:
-                config = tomllib.load(f)
-
-            display_settings = config.get('display', {})
-            fonts_settings = config.get('fonts', {})
-            # Include font_name (editable) but not font_path (toml-only)
-            if 'font_name' in fonts_settings:
-                display_settings['font_name'] = fonts_settings['font_name']
-            return jsonify({'display': display_settings}), 200
-        except FileNotFoundError:
-            return jsonify({'error': 'settings.toml file not found'}), 404
-        except Exception as e:
-            logging.error(f"Error loading display settings: {e}")
-            return jsonify({'error': str(e)}), 500
-
-    def _set_display_settings(self) -> Tuple[Dict, int]:
-        """Set display settings in settings.toml [display] section.
-
-        Expects JSON body with 'display' object containing settings.
-        Can also update font_name in [fonts] section.
-
-        Returns:
-            JSON response with success/error and status code
-        """
-        try:
-            data = request.get_json()
-
-            if 'display' not in data or not isinstance(data['display'], dict):
-                return jsonify({'error': 'Missing or invalid display settings object'}), 400
-
-            new_display = data['display']
-
-            # Extract font_name if present (it will be saved to [fonts] section)
-            font_name = new_display.pop('font_name', None)
-
-            # Validate display settings
-            int_fields = ['line_height', 'header_line_height', 'header_rows']
-            signed_int_fields = ['font_shift']  # Can be 0 or negative
-            float_fields = ['interval']
-
-            for field in int_fields:
-                if field in new_display:
-                    try:
-                        value = int(new_display[field])
-                        if value <= 0:
-                            return jsonify({'error': f'{field} must be a positive integer'}), 400
-                        new_display[field] = value
-                    except (ValueError, TypeError):
-                        return jsonify({'error': f'{field} must be an integer'}), 400
-
-            for field in signed_int_fields:
-                if field in new_display:
-                    try:
-                        new_display[field] = int(new_display[field])
-                    except (ValueError, TypeError):
-                        return jsonify({'error': f'{field} must be an integer'}), 400
-
-            for field in float_fields:
-                if field in new_display:
-                    try:
-                        value = float(new_display[field])
-                        if value <= 0:
-                            return jsonify({'error': f'{field} must be a positive number'}), 400
-                        new_display[field] = value
-                    except (ValueError, TypeError):
-                        return jsonify({'error': f'{field} must be a number'}), 400
-
-            # Validate font_name if present
-            if font_name is not None:
-                if not isinstance(font_name, str) or not font_name.strip():
-                    return jsonify({'error': 'font_name must be a non-empty string'}), 400
-                # Basic validation - check if it looks like a font file
-                if not font_name.endswith('.bdf'):
-                    return jsonify({'error': 'font_name must be a .bdf font file'}), 400
-
-            # Load current settings
-            settings_file = self.config_dir / "settings.toml"
-            with open(settings_file, 'rb') as f:
-                config = tomllib.load(f)
-
-            # Update display section
-            if 'display' not in config:
-                config['display'] = {}
-            config['display'].update(new_display)
-
-            # Update font_name in fonts section if provided
-            if font_name is not None:
-                if 'fonts' not in config:
-                    config['fonts'] = {}
-                config['fonts']['font_name'] = font_name
-                logging.info(f"Updated font_name: {font_name}")
-
-            # Write back to file
-            with open(settings_file, 'wb') as f:
-                tomli_w.dump(config, f)
-
-            # Prepare response
-            response_display = config['display'].copy()
-            if 'fonts' in config and 'font_name' in config['fonts']:
-                response_display['font_name'] = config['fonts']['font_name']
-
-            logging.info(f"Updated display settings: {new_display}")
-            return jsonify({'success': True, 'display': response_display}), 200
-
-        except FileNotFoundError:
-            return jsonify({'error': 'settings.toml file not found'}), 404
-        except Exception as e:
-            logging.error(f"Error setting display settings: {e}")
-            return jsonify({'error': str(e)}), 500
-
     def _upload_events(self) -> Tuple[Dict, int]:
         """Upload and replace lynx.evt file.
 
@@ -769,10 +652,10 @@ class WebServer:
                 return jsonify({'error': 'Content cannot be empty'}), 400
 
             # Validate content by attempting to parse it
-            events_file = self.config_dir / "lynx.evt"
+            events_file = self._lynx_path()
 
             # Create a temporary file to test parsing
-            temp_file = self.config_dir / "lynx.evt.tmp"
+            temp_file = events_file.with_name(events_file.name + ".tmp")
             try:
                 with open(temp_file, 'w', encoding='utf-8', newline='') as f:
                     f.write(content)
@@ -787,7 +670,7 @@ class WebServer:
 
                 # Parsing succeeded - create backup of existing file
                 if events_file.exists():
-                    backup_file = self.config_dir / "lynx.evt.bak"
+                    backup_file = events_file.with_name(events_file.name + ".bak")
                     shutil.copy2(events_file, backup_file)
                     logging.info(f"Created backup: {backup_file}")
 
@@ -827,7 +710,7 @@ class WebServer:
                 return jsonify({'error': 'Content cannot be empty'}), 400
 
             # Load existing events for validation
-            events_file = self.config_dir / "lynx.evt"
+            events_file = self._lynx_path()
             try:
                 events = parse_lynx_file(str(events_file))
             except Exception as e:
@@ -916,9 +799,9 @@ class WebServer:
             if not schedule_content.strip():
                 return jsonify({'error': 'Schedule content cannot be empty'}), 400
 
-            events_file = self.config_dir / "lynx.evt"
+            events_file = self._lynx_path()
             schedule_file = self.config_dir / "lynx.sch"
-            events_temp = self.config_dir / "lynx.evt.tmp"
+            events_temp = events_file.with_name(events_file.name + ".tmp")
             schedule_temp = self.config_dir / "lynx.sch.tmp"
 
             try:
@@ -957,7 +840,7 @@ class WebServer:
 
                 # Both files validated - create backups
                 if events_file.exists():
-                    backup_file = self.config_dir / "lynx.evt.bak"
+                    backup_file = events_file.with_name(events_file.name + ".bak")
                     shutil.copy2(events_file, backup_file)
                     logging.info(f"Created backup: {backup_file}")
 
@@ -1029,32 +912,51 @@ class WebServer:
         return jsonify(self._get_mode_status()), 200
 
     def _get_mode_settings(self, mode: str):
-        if self._get_mode_config is None:
-            return jsonify({'error': 'not running under display_manager'}), 501
-        from config_loader import VALID_MODES
+        """Read one mode's settings.
+
+        Works with or without the manager: its callback additionally restarts
+        the active child on write, but reading and writing settings.toml needs
+        nothing from it, so display_event serving its own web UI still works.
+        """
         if mode not in VALID_MODES:
             return jsonify({'error': f'Invalid mode. Valid values: {VALID_MODES}'}), 400
         try:
-            cfg = self._get_mode_config(mode)
+            if self._get_mode_config is not None:
+                cfg = self._get_mode_config(mode)
+            else:
+                cfg = load_mode_config(str(self.config_dir), mode)
         except Exception as exc:
             return jsonify({'error': str(exc)}), 500
         return jsonify({'mode': mode, 'settings': cfg}), 200
 
     def _set_mode_settings(self, mode: str):
-        if self._set_mode_config is None:
-            return jsonify({'error': 'not running under display_manager'}), 501
-        from config_loader import VALID_MODES
         if mode not in VALID_MODES:
             return jsonify({'error': f'Invalid mode. Valid values: {VALID_MODES}'}), 400
         data = request.get_json()
         if not data or 'settings' not in data or not isinstance(data['settings'], dict):
             return jsonify({'error': 'Missing or invalid settings object'}), 400
+
+        # Coerce and validate here so bad input is a 400 rather than a 500 from
+        # deeper down, and never reaches settings.toml.
         try:
-            self._set_mode_config(mode, data['settings'])
+            values = normalize_mode_config(mode, data['settings'])
+        except ConfigError as exc:
+            return jsonify({'error': str(exc)}), 400
+
+        try:
+            if self._set_mode_config is not None:
+                self._set_mode_config(mode, values)
+            else:
+                save_mode_config(str(self.config_dir), mode, values)
         except Exception as exc:
             logging.error('Error saving mode settings: %s', exc)
             return jsonify({'error': str(exc)}), 500
-        return jsonify({'success': True}), 200
+
+        try:
+            cfg = load_mode_config(str(self.config_dir), mode)
+        except Exception:
+            cfg = values
+        return jsonify({'success': True, 'mode': mode, 'settings': cfg}), 200
 
     def _get_display_power(self):
         """Get current display power state."""

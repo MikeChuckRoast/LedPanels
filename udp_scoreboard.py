@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Optional
 
-from config_loader import ConfigError, load_settings
+from config_loader import ConfigError, load_mode_config, load_settings
 from display_utils import (calculate_text_baseline, draw_centered_text,
                            fill_rectangle, load_font_metadata,
                            load_font_with_fallback, measure_text_width,
@@ -105,7 +105,8 @@ def render_scoreboard(canvas, graphics, top_font, bottom_font,
                      event_name: str, time_value: str,
                      canvas_width: int, canvas_height: int,
                      top_font_shift_v: int, top_font_shift_h: int,
-                     bottom_font_shift_v: int, bottom_font_shift_h: int):
+                     bottom_font_shift_v: int, bottom_font_shift_h: int,
+                     top_height: int = 24, bottom_height: int = 0):
     """Render scoreboard display with event name and time.
 
     Args:
@@ -123,13 +124,18 @@ def render_scoreboard(canvas, graphics, top_font, bottom_font,
         top_font_shift_h: Horizontal adjustment for top section font
         bottom_font_shift_v: Vertical adjustment for bottom section font
         bottom_font_shift_h: Horizontal adjustment for bottom section font
+        top_height: Height of the event-name band in pixels
+        bottom_height: Height of the box the time is centred in; 0 means the
+            rest of the panel below top_height
     """
     canvas.Clear()
 
-    # Define section heights
-    top_height = 24
-    bottom_y_start = 24
-    bottom_height = canvas_height - top_height
+    # Section geometry. The bottom fill always runs to the foot of the panel;
+    # bottom_height only sets the box the time is centred within, so a custom
+    # value can nudge the time without leaving an unpainted strip.
+    bottom_y_start = top_height
+    if bottom_height <= 0:
+        bottom_height = canvas_height - top_height
 
     # Colors
     red = graphics.Color(255, 0, 0)
@@ -144,7 +150,7 @@ def render_scoreboard(canvas, graphics, top_font, bottom_font,
         available_width = canvas_width - 4
         event_name_display = truncate_text_to_width(top_font, event_name, available_width)
         draw_centered_text(canvas, graphics, top_font, top_font_metadata, 0, top_height, canvas_width,
-                           event_name_display, white, top_font_shift_v)
+                           event_name_display, white, top_font_shift_v, top_font_shift_h)
 
     # Draw bottom section (time) - black background, white text
     fill_rectangle(canvas, graphics, 0, bottom_y_start, canvas_width - 1,
@@ -156,7 +162,7 @@ def render_scoreboard(canvas, graphics, top_font, bottom_font,
         time_value_display = format_time(time_value)
         time_value_display = truncate_text_to_width(bottom_font, time_value_display, available_width)
         draw_centered_text(canvas, graphics, bottom_font, bottom_font_metadata, bottom_y_start, bottom_height, canvas_width,
-                           time_value_display, white, bottom_font_shift_v)
+                           time_value_display, white, bottom_font_shift_v, bottom_font_shift_h)
 
 
 def format_time(time_str: str) -> str:
@@ -184,38 +190,50 @@ def main():
     pre_args, _ = pre_parser.parse_known_args()
     config_dir = pre_args.config_dir
 
-    # Try to load settings from config
+    # Global settings, then this mode's own section
     try:
         settings = load_settings(config_dir)
         hw = settings.get('hardware', {})
         fonts_cfg = settings.get('fonts', {})
         net = settings.get('network', {})
-        scoreboard_cfg = settings.get('scoreboard', {})
     except ConfigError as e:
         logging.warning("Could not load config: %s. Using defaults.", e)
         hw = {}
         fonts_cfg = {}
         net = {}
-        scoreboard_cfg = {}
 
-    # Build default font paths
+    try:
+        mode_cfg = load_mode_config(config_dir, 'udp_scoreboard')
+    except ConfigError:
+        mode_cfg = {}
+
+    # Build default font paths from the global font directory
     font_path = fonts_cfg.get('font_path', './config/fonts')
-    default_top_font = os.path.join(font_path, scoreboard_cfg.get('top_font_name', 'helvB12.bdf'))
-    default_bottom_font = os.path.join(font_path, scoreboard_cfg.get('bottom_font_name', 'helvB18.bdf'))
+    default_top_font = os.path.join(font_path, mode_cfg.get('top_font_name', 'helvB18.bdf'))
+    default_bottom_font = os.path.join(font_path, mode_cfg.get('bottom_font_name', 'Roboto-Black-50.bdf'))
 
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Display scoreboard data from UDP on LED matrix")
     parser.add_argument('--config-dir', default='./config',
                        help='Path to configuration directory (default: ./config)')
     parser.add_argument('--port', '-p', type=int,
-                       default=scoreboard_cfg.get('udp_port', 5568),
+                       default=mode_cfg.get('udp_port', 5568),
                        help='UDP port to listen on (default: 5568)')
+    parser.add_argument('--buffer-size', type=int,
+                       default=mode_cfg.get('buffer_size', 4096),
+                       help='Maximum UDP packet size in bytes (default: 4096)')
     parser.add_argument('--width', type=int,
-                       default=scoreboard_cfg.get('width', 64),
-                       help='Base panel width in pixels (default: 64)')
+                       default=hw.get('width', 64),
+                       help='Single panel width in pixels (default: 64)')
     parser.add_argument('--height', type=int,
-                       default=scoreboard_cfg.get('height', 32),
-                       help='Base panel height in pixels (default: 32)')
+                       default=hw.get('height', 32),
+                       help='Single panel height in pixels (default: 32)')
+    parser.add_argument('--top-height', type=int,
+                       default=mode_cfg.get('top_height', 24),
+                       help='Height of the event-name band in pixels (default: 24)')
+    parser.add_argument('--bottom-height', type=int,
+                       default=mode_cfg.get('bottom_height', 0),
+                       help='Height of the time band; 0 uses the rest of the panel')
     parser.add_argument('--top-font',
                        default=default_top_font,
                        help='Path to BDF font for event name (top section)')
@@ -223,13 +241,13 @@ def main():
                        default=default_bottom_font,
                        help='Path to BDF font for time (bottom section)')
     parser.add_argument('--chain', type=int,
-                       default=scoreboard_cfg.get('chain', 3),
-                       help='Panels chained horizontally (default: 3)')
+                       default=hw.get('chain', 2),
+                       help='Panels chained horizontally')
     parser.add_argument('--parallel', type=int,
-                       default=scoreboard_cfg.get('parallel', 2),
-                       help='Panels stacked vertically (default: 2)')
+                       default=hw.get('parallel', 4),
+                       help='Panels stacked vertically')
     parser.add_argument('--gpio-slowdown', type=int,
-                       default=scoreboard_cfg.get('gpio_slowdown', 4),
+                       default=hw.get('gpio_slowdown', 3),
                        help='GPIO slowdown for RGBMatrixOptions')
     parser.add_argument('--fpp', action='store_true',
                        default=net.get('fpp_enabled', False),
@@ -247,17 +265,17 @@ def main():
                        default=net.get('colorlight_interface', 'eth0'),
                        help='Network interface for ColorLight (e.g., eth0)')
     parser.add_argument('--top-font-shift-vertical', type=int,
-                       default=scoreboard_cfg.get('top_font_shift_vertical', 7),
-                       help='Vertical font adjustment for top section (default: 7)')
+                       default=mode_cfg.get('top_font_shift_vertical', 0),
+                       help='Vertical font adjustment for top section')
     parser.add_argument('--top-font-shift-horizontal', type=int,
-                       default=scoreboard_cfg.get('top_font_shift_horizontal', 0),
-                       help='Horizontal font adjustment for top section (default: 0)')
+                       default=mode_cfg.get('top_font_shift_horizontal', 0),
+                       help='Horizontal font adjustment for top section')
     parser.add_argument('--bottom-font-shift-vertical', type=int,
-                       default=scoreboard_cfg.get('bottom_font_shift_vertical', 15),
-                       help='Vertical font adjustment for bottom section (default: 15)')
+                       default=mode_cfg.get('bottom_font_shift_vertical', 0),
+                       help='Vertical font adjustment for bottom section')
     parser.add_argument('--bottom-font-shift-horizontal', type=int,
-                       default=scoreboard_cfg.get('bottom_font_shift_horizontal', 34),
-                       help='Horizontal font adjustment for bottom section (default: 34)')
+                       default=mode_cfg.get('bottom_font_shift_horizontal', 0),
+                       help='Horizontal font adjustment for bottom section')
 
     args = parser.parse_args()
 
@@ -317,14 +335,15 @@ def main():
                          state["event_name"], state["time_value"],
                          canvas.width, canvas.height,
                          args.top_font_shift_vertical, args.top_font_shift_horizontal,
-                         args.bottom_font_shift_vertical, args.bottom_font_shift_horizontal)
+                         args.bottom_font_shift_vertical, args.bottom_font_shift_horizontal,
+                         args.top_height, args.bottom_height)
         canvas = matrix.SwapOnVSync(canvas)
 
         # Main loop
         while True:
             try:
                 # Try to receive UDP message
-                data, addr = sock.recvfrom(4096)
+                data, addr = sock.recvfrom(args.buffer_size)
 
                 # Parse JSON
                 try:
@@ -351,7 +370,8 @@ def main():
                              state["event_name"], state["time_value"],
                              canvas.width, canvas.height,
                              args.top_font_shift_vertical, args.top_font_shift_horizontal,
-                             args.bottom_font_shift_vertical, args.bottom_font_shift_horizontal)
+                             args.bottom_font_shift_vertical, args.bottom_font_shift_horizontal,
+                             args.top_height, args.bottom_height)
             canvas = matrix.SwapOnVSync(canvas)
 
     except KeyboardInterrupt:

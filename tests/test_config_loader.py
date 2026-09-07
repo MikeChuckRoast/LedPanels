@@ -69,8 +69,8 @@ class TestEnsureConfigDirectory:
 
         content = settings_file.read_text()
         assert "[hardware]" in content
-        assert "[display]" in content
         assert "[fonts]" in content
+        assert "[mode.display_event]" in content
 
 
 class TestLoadCurrentEvent:
@@ -142,8 +142,8 @@ class TestLoadSettings:
         settings = load_settings(str(temp_config_dir))
 
         assert "hardware" in settings
-        assert "display" in settings
         assert "fonts" in settings
+        assert "files" in settings
         assert settings["hardware"]["width"] == 64
         assert settings["hardware"]["height"] == 32
 
@@ -180,6 +180,8 @@ class TestAnimationModeRegistration:
             "fps": 0,
             "loop": True,
             "background": "#000000",
+            "max_frames": 600,
+            "ffmpeg": "",
         }
 
     def test_file_setting_round_trips(self, temp_config_dir):
@@ -215,6 +217,124 @@ class TestAnimationModeRegistration:
         assert (temp_config_dir / "animations").is_dir()
 
 
+class TestGlobalAndModeSplit:
+    """The [mode.*] sections must stay consistent with the code that reads them."""
+
+    def test_every_default_has_a_schema_entry(self):
+        from config_loader import _MODE_DEFAULTS, _MODE_SCHEMA, VALID_MODES
+
+        for mode in VALID_MODES:
+            assert set(_MODE_DEFAULTS[mode]) == set(_MODE_SCHEMA[mode]), mode
+
+    def test_defaults_pass_their_own_validation(self):
+        from config_loader import (_MODE_DEFAULTS, VALID_MODES,
+                                   normalize_mode_config)
+
+        for mode in VALID_MODES:
+            assert normalize_mode_config(mode, _MODE_DEFAULTS[mode]) == _MODE_DEFAULTS[mode]
+
+    @pytest.mark.parametrize("template", [
+        None,  # the file ensure_config_directory writes
+        "config/settings.toml.example",
+        "config/settings.toml.pi",
+    ])
+    def test_shipped_templates_load(self, tmp_path, colors_csv_fixture, template):
+        """Every template must satisfy load_settings and hold only known mode keys."""
+        import shutil
+        import tomllib
+
+        from config_loader import (VALID_MODES, ensure_config_directory,
+                                   load_mode_config, normalize_mode_config)
+
+        config_dir = tmp_path / "config"
+        ensure_config_directory(str(config_dir))
+        if template is not None:
+            repo_root = Path(__file__).parent.parent
+            shutil.copy(repo_root / template, config_dir / "settings.toml")
+        shutil.copy(colors_csv_fixture, config_dir / "colors.csv")
+
+        settings = load_settings(str(config_dir))
+        assert {"hardware", "network", "fonts", "files"} <= set(settings)
+        # Per-mode settings are not global settings
+        assert "display" not in settings
+        assert "scoreboard" not in settings
+
+        raw = tomllib.loads((config_dir / "settings.toml").read_text(encoding="utf-8"))
+        for mode in VALID_MODES:
+            assert mode in raw["mode"], mode
+            normalize_mode_config(mode, raw["mode"][mode])  # raises on an unknown key
+            load_mode_config(str(config_dir), mode)
+
+    def test_missing_mode_section_falls_back_to_defaults(self, temp_config_dir,
+                                                         settings_toml_fixture):
+        """A mode with no section still gets a full config, not an empty dict."""
+        import shutil
+
+        from config_loader import _MODE_DEFAULTS, load_mode_config
+
+        shutil.copy(settings_toml_fixture, temp_config_dir / "settings.toml")
+        cfg = load_mode_config(str(temp_config_dir), "udp_scoreboard")
+
+        assert cfg == _MODE_DEFAULTS["udp_scoreboard"]
+
+    def test_bad_value_falls_back_instead_of_raising(self, temp_config_dir):
+        """One broken key must not stop a mode from loading the rest."""
+        from config_loader import load_mode_config
+
+        (temp_config_dir / "settings.toml").write_text(
+            '[mode.display_event]\nline_height = 0\nheader_rows = 3\n', encoding="utf-8")
+
+        cfg = load_mode_config(str(temp_config_dir), "display_event")
+
+        assert cfg["line_height"] == 24   # default, the configured 0 is invalid
+        assert cfg["header_rows"] == 3    # the valid neighbour still applies
+
+    def test_unknown_key_is_ignored(self, temp_config_dir):
+        from config_loader import load_mode_config
+
+        (temp_config_dir / "settings.toml").write_text(
+            '[mode.display_event]\nfont_shft = 4\n', encoding="utf-8")
+
+        cfg = load_mode_config(str(temp_config_dir), "display_event")
+
+        assert "font_shft" not in cfg
+        assert cfg["font_shift"] == 0
+
+    def test_save_rejects_an_invalid_value(self, temp_config_dir):
+        from config_loader import (ConfigError, ensure_config_directory,
+                                   save_mode_config)
+
+        ensure_config_directory(str(temp_config_dir))
+        with pytest.raises(ConfigError, match="line_height"):
+            save_mode_config(str(temp_config_dir), "display_event", {"line_height": -5})
+
+
+class TestResolveDataFilePaths:
+    """colors_file and lynx_file must actually be honoured."""
+
+    def test_colors_path_follows_the_setting(self, temp_config_dir):
+        from config_loader import resolve_colors_path
+
+        (temp_config_dir / "settings.toml").write_text(
+            '[files]\ncolors_file = "teams.csv"\n', encoding="utf-8")
+
+        assert resolve_colors_path(str(temp_config_dir)).name == "teams.csv"
+
+    def test_lynx_path_follows_the_setting(self, temp_config_dir):
+        from config_loader import resolve_lynx_path
+
+        (temp_config_dir / "settings.toml").write_text(
+            '[mode.display_event]\nlynx_file = "meet.evt"\n', encoding="utf-8")
+
+        assert resolve_lynx_path(str(temp_config_dir)).name == "meet.evt"
+
+    def test_unreadable_settings_fall_back_to_defaults(self, temp_config_dir):
+        from config_loader import resolve_colors_path, resolve_lynx_path
+
+        assert resolve_colors_path(str(temp_config_dir)).name == "colors.csv"
+        assert resolve_lynx_path(str(temp_config_dir)).name == "lynx.evt"
+
+
 class TestColorLightRowDelaySetting:
     """Tests for the optional [network].colorlight_row_delay_ms validation."""
 
@@ -225,7 +345,7 @@ class TestColorLightRowDelaySetting:
         settings["network"] = dict(settings["network"])
         if value is not None:
             settings["network"]["colorlight_row_delay_ms"] = value
-        settings["files"] = {"lynx_file": "lynx.evt", "colors_file": "colors.csv"}
+        settings["files"] = {"colors_file": "colors.csv"}
         (config_dir / "colors.csv").write_text("affiliation_name,display_name,background_hex,text_hex\n")
         with open(config_dir / "settings.toml", "wb") as f:
             tomli_w.dump(settings, f)

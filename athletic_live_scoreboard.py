@@ -13,8 +13,8 @@ The --name and --uuid values come from the scoreboard URL:
 
 How it works:
     1. Fetches board config from fieldappapi.athletic.live to get meetId + eventId.
-    2. Polls the Firebase Realtime Database (trackmeet-io project) every --interval
-       seconds for the most recent field result (lastMark + upNow).
+    2. Polls the Firebase Realtime Database (trackmeet-io project) every
+       --poll-interval seconds for the most recent field result (lastMark + upNow).
     3. Renders up to 3 lines of text on the LED panel:
          Line 1: event name  (e.g. "Boys Shot Put")
          Line 2: athlete + attempt  (e.g. "N. Battle  #3")
@@ -35,6 +35,8 @@ from typing import Optional
 
 import requests
 
+from config_loader import (ConfigError, load_mode_config, load_settings,
+                           resolve_colors_path)
 from display_utils import (calculate_text_baseline, fill_rectangle,
                            load_font_metadata, load_font_with_fallback,
                            measure_text_width, truncate_text_to_width,
@@ -419,67 +421,108 @@ def render_standby(
 # ---------------------------------------------------------------------------
 
 def main():
+    # Pre-parse config-dir so settings can seed the real parser's defaults,
+    # matching the other display modes.
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config-dir", default="./config")
+    pre_args, _ = pre_parser.parse_known_args()
+    config_dir = pre_args.config_dir
+
+    try:
+        settings = load_settings(config_dir)
+        hw = settings.get("hardware", {})
+        fonts_cfg = settings.get("fonts", {})
+        net = settings.get("network", {})
+    except ConfigError as exc:
+        log.warning("Could not load config: %s. Using defaults.", exc)
+        hw = {}
+        fonts_cfg = {}
+        net = {}
+
+    try:
+        mode_cfg = load_mode_config(config_dir, "athletic_live_scoreboard")
+    except ConfigError:
+        mode_cfg = {}
+
+    default_font = os.path.join(fonts_cfg.get("font_path", "fonts"),
+                                mode_cfg.get("font_name", "helvB14.bdf"))
+
     parser = argparse.ArgumentParser(
         description="Display an AthleticLIVE field scoreboard on an LED panel."
     )
     parser.add_argument(
-        "--name", required=True,
+        "--config-dir", default="./config",
+        help="Path to configuration directory (default: ./config)"
+    )
+    parser.add_argument(
+        "--name", default=mode_cfg.get("name", ""),
         help="Scoreboard computer name from the URL (e.g. FUSHIABOX)"
     )
     parser.add_argument(
-        "--uuid", required=True,
+        "--uuid", default=mode_cfg.get("uuid", ""),
         help="Scoreboard UUID from the URL"
     )
     parser.add_argument(
-        "--interval", type=float, default=5.0,
-        help="Poll interval in seconds (default: 5)"
+        "--poll-interval", type=float, default=mode_cfg.get("poll_interval", 3.0),
+        help="Seconds between polls (default: 3)"
     )
     parser.add_argument(
-        "--rows",    type=int, default=32,  help="LED panel rows (default: 32)"
+        "--rows", type=int, default=hw.get("height", 32),
+        help="Single panel height in pixels"
     )
     parser.add_argument(
-        "--cols",    type=int, default=64,  help="LED panel cols (default: 64)"
+        "--cols", type=int, default=hw.get("width", 64),
+        help="Single panel width in pixels"
     )
     parser.add_argument(
-        "--chain",   type=int, default=2,   help="Chain length (default: 2)"
+        "--chain", type=int, default=hw.get("chain", 2),
+        help="Panels chained horizontally"
     )
     parser.add_argument(
-        "--parallel",type=int, default=4,   help="Parallel chains (default: 4)"
+        "--parallel", type=int, default=hw.get("parallel", 4),
+        help="Panels stacked vertically"
     )
     parser.add_argument(
-        "--gpio-slowdown", type=int, default=3, help="GPIO slowdown (default: 3)"
+        "--gpio-slowdown", type=int, default=hw.get("gpio_slowdown", 3),
+        help="GPIO slowdown for RGBMatrixOptions"
     )
     parser.add_argument(
-        "--fpp", action="store_true", default=False,
+        "--fpp", action="store_true", default=net.get("fpp_enabled", False),
         help="Use FPP output instead of direct matrix control"
     )
     parser.add_argument(
-        "--fpp-host", default="127.0.0.1",
+        "--fpp-host", default=net.get("fpp_host", "127.0.0.1"),
         help="FPP host IP address"
     )
     parser.add_argument(
-        "--fpp-port", type=int, default=4048,
+        "--fpp-port", type=int, default=net.get("fpp_port", 4048),
         help="FPP DDP port"
     )
     parser.add_argument(
-        "--colorlight", action="store_true", default=False,
+        "--colorlight", action="store_true",
+        default=net.get("colorlight_enabled", False),
         help="Send frames to ColorLight 5A-75B via raw Ethernet (requires root/sudo)"
     )
     parser.add_argument(
-        "--colorlight-interface", default="eth0",
+        "--colorlight-interface", default=net.get("colorlight_interface", "eth0"),
         help="Network interface for ColorLight (e.g., eth0)"
     )
     parser.add_argument(
-        "--font",
-        default="fonts/helvB14.bdf",
-        help="BDF font path (default: fonts/helvB14.bdf)"
+        "--font", default=default_font,
+        help="Path to BDF font (defaults to [fonts].font_path + this mode's font_name)"
     )
     parser.add_argument(
-        "--colors-csv",
-        default=os.path.join("config", "colors.csv"),
-        help="Path to colors CSV (default: config/colors.csv)"
+        "--colors-csv", default=str(resolve_colors_path(config_dir)),
+        help="Path to colors CSV (defaults to [files].colors_file)"
     )
     args = parser.parse_args()
+
+    # name/uuid are required, but they can come from settings.toml rather than
+    # the command line, so this is checked after parsing instead of by argparse.
+    if not args.name.strip() or not args.uuid.strip():
+        parser.error(
+            "--name and --uuid are required; set them here or in "
+            "[mode.athletic_live_scoreboard] in settings.toml")
 
     # -- Fetch board config once ------------------------------------------
     log.info("Fetching board config for %s / %s …", args.name, args.uuid)
@@ -580,9 +623,9 @@ def main():
     last_data = None
     last_board_check = 0
     consecutive_errors = 0
-    sleep_interval = args.interval
+    sleep_interval = args.poll_interval
     MAX_BACKOFF = 60.0
-    log.info("Polling Firebase every %.1fs …  (Ctrl-C to stop)", args.interval)
+    log.info("Polling Firebase every %.1fs …  (Ctrl-C to stop)", args.poll_interval)
 
     try:
         while True:
@@ -641,7 +684,7 @@ def main():
                     log.info("API reachable again after %d error(s)", consecutive_errors)
                 consecutive_errors = 0
                 net_ok = True
-                sleep_interval = args.interval
+                sleep_interval = args.poll_interval
 
                 # Only re-render when something changed.
                 # Do not cache partial results (no athlete name) as last_data —
@@ -703,11 +746,11 @@ def main():
                         except ValueError:
                             pass
                     if retry_after is None:
-                        retry_after = min(MAX_BACKOFF, args.interval * (2 ** min(consecutive_errors, 6)))
+                        retry_after = min(MAX_BACKOFF, args.poll_interval * (2 ** min(consecutive_errors, 6)))
                     sleep_interval = retry_after
                     log.warning("Rate limited (429) — backing off for %.0fs", sleep_interval)
                 else:
-                    sleep_interval = min(MAX_BACKOFF, args.interval * (2 ** min(consecutive_errors - 1, 6)))
+                    sleep_interval = min(MAX_BACKOFF, args.poll_interval * (2 ** min(consecutive_errors - 1, 6)))
                     log.warning("Network error (#%d, retry in %.0fs): %s",
                                 consecutive_errors, sleep_interval, exc)
                 # Re-render last known state with red indicator
@@ -721,7 +764,7 @@ def main():
             except Exception as exc:
                 consecutive_errors += 1
                 net_ok = False
-                sleep_interval = min(MAX_BACKOFF, args.interval * (2 ** min(consecutive_errors - 1, 6)))
+                sleep_interval = min(MAX_BACKOFF, args.poll_interval * (2 ** min(consecutive_errors - 1, 6)))
                 log.exception("Unexpected error (#%d, retry in %.0fs): %s",
                               consecutive_errors, sleep_interval, exc)
                 if last_data:

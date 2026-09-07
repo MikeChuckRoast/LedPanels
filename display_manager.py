@@ -49,53 +49,17 @@ def _build_display_event_args(config_dir: str) -> list:
 
 
 def _build_athletic_live_args(config_dir: str) -> list:
-    from config_loader import load_settings
+    # The script reads [hardware], [network], [fonts] and its own mode section
+    # itself, so only the config directory needs passing. name/uuid are checked
+    # here so a misconfigured mode fails with a clear message instead of a
+    # child process that exits immediately.
     cfg = load_mode_config(config_dir, "athletic_live_scoreboard")
-    name = cfg.get("name", "").strip()
-    uuid = cfg.get("uuid", "").strip()
-    if not name or not uuid:
+    if not cfg.get("name", "").strip() or not cfg.get("uuid", "").strip():
         raise ConfigError(
             "athletic_live_scoreboard requires 'name' and 'uuid' in "
             "[mode.athletic_live_scoreboard] settings"
         )
-    args = ["--name", name, "--uuid", uuid]
-    if "interval" in cfg:
-        args += ["--interval", str(cfg["interval"])]
-    if "font" in cfg:
-        args += ["--font", cfg["font"]]
-    args += ["--colors-csv", str(Path(config_dir) / "colors.csv")]
-
-    # Mirror [hardware] and [network] from settings.toml — same values
-    # that display_event.py uses so both scripts target the same panel.
-    try:
-        settings = load_settings(config_dir)
-        hw = settings.get("hardware", {})
-        if "height" in hw:
-            args += ["--rows", str(hw["height"])]
-        if "width" in hw:
-            args += ["--cols", str(hw["width"])]
-        if "chain" in hw:
-            args += ["--chain", str(hw["chain"])]
-        if "parallel" in hw:
-            args += ["--parallel", str(hw["parallel"])]
-        if "gpio_slowdown" in hw:
-            args += ["--gpio-slowdown", str(hw["gpio_slowdown"])]
-
-        net = settings.get("network", {})
-        if net.get("colorlight_enabled", False):
-            args += ["--colorlight"]
-            if "colorlight_interface" in net:
-                args += ["--colorlight-interface", net["colorlight_interface"]]
-        elif net.get("fpp_enabled", False):
-            args += ["--fpp"]
-            if "fpp_host" in net:
-                args += ["--fpp-host", net["fpp_host"]]
-            if "fpp_port" in net:
-                args += ["--fpp-port", str(net["fpp_port"])]
-    except Exception as exc:
-        log.warning("Could not read settings for athletic_live_scoreboard: %s", exc)
-
-    return args
+    return ["--config-dir", config_dir]
 
 
 def _build_udp_scoreboard_args(config_dir: str) -> list:

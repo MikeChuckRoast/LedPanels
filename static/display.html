@@ -203,10 +203,13 @@
         }, 5000);
       }
 
+      // These live in [mode.display_event] in settings.toml.
+      const SETTINGS_ENDPOINT = "/api/mode_settings/display_event";
+
       async function loadSettings() {
         try {
-          const data = await fetchAPI("/api/display_settings");
-          const display = data.display;
+          const data = await fetchAPI(SETTINGS_ENDPOINT);
+          const display = data.settings;
 
           // Populate form fields
           document.getElementById("line_height").value =
@@ -231,36 +234,36 @@
         event.preventDefault();
 
         const formData = new FormData(event.target);
-        const display = {};
+        const settings = {};
 
         // Convert form data to object with proper types
-        display.line_height = parseInt(formData.get("line_height"));
-        display.header_line_height = parseInt(
+        settings.line_height = parseInt(formData.get("line_height"));
+        settings.header_line_height = parseInt(
           formData.get("header_line_height")
         );
-        display.header_rows = parseInt(formData.get("header_rows"));
-        display.interval = parseFloat(formData.get("interval"));
-        display.font_shift = parseInt(formData.get("font_shift"));
-        display.font_name = formData.get("font_name");
+        settings.header_rows = parseInt(formData.get("header_rows"));
+        settings.interval = parseFloat(formData.get("interval"));
+        settings.font_shift = parseInt(formData.get("font_shift"));
+        settings.font_name = formData.get("font_name");
 
         // Validate
         if (
-          display.line_height <= 0 ||
-          display.header_line_height <= 0 ||
-          display.header_rows <= 0 ||
-          display.interval <= 0
+          settings.line_height <= 0 ||
+          settings.header_line_height <= 0 ||
+          settings.header_rows <= 0 ||
+          settings.interval <= 0
         ) {
           showAlert("All values must be positive numbers", "error");
           return;
         }
 
-        if (!display.font_name || !display.font_name.trim()) {
+        if (!settings.font_name || !settings.font_name.trim()) {
           showAlert("Font name cannot be empty", "error");
           return;
         }
 
         try {
-          await postAPI("/api/display_settings", { display });
+          await postAPI(SETTINGS_ENDPOINT, { settings });
           showAlert("Display settings saved successfully!");
         } catch (error) {
           showAlert(`Error saving settings: ${error.message}`, "error");

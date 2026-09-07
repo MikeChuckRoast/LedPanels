@@ -7,21 +7,6 @@ chain = 2
 parallel = 4
 gpio_slowdown = 3
 
-[display]
-line_height = 24
-header_line_height = 16
-header_rows = 2
-interval = 2.0
-font_shift = 7
-
-[fonts]
-font_path = "/path/to/test/fonts"
-font_name = "helvB12.bdf"
-
-[files]
-lynx_file = "lynx.evt"
-colors_file = "colors.csv"
-
 [network]
 fpp_enabled = false
 fpp_host = "127.0.0.1"
@@ -29,17 +14,25 @@ fpp_port = 4048
 colorlight_enabled = false
 colorlight_interface = "eth0"
 
-[keyboard]
-device_path = ""
+[fonts]
+font_path = "/path/to/test/fonts"
 
-[behavior]
-once = false
-
-[monitoring]
-file_watch_enabled = true
-poll_interval = 1.0
+[files]
+colors_file = "colors.csv"
 
 [web]
 web_enabled = true
 web_host = "0.0.0.0"
 web_port = 5000
+
+[mode.display_event]
+line_height = 24
+header_line_height = 16
+header_rows = 2
+interval = 2.0
+font_shift = 7
+font_name = "helvB14.bdf"
+lynx_file = "lynx.evt"
+once = false
+keyboard_device = ""
+file_watch_enabled = true

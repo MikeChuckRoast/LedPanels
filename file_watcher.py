@@ -2,9 +2,10 @@
 File watcher for automatic reload of event data files.
 
 Monitors config directory for changes to:
-- lynx.evt (event timing data)
+- the Lynx event file named by [mode.display_event].lynx_file
+- the team colors file named by [files].colors_file
 - current_event.json (current event selection)
-- colors.csv (team color mappings)
+- lynx.sch (schedule) and settings.toml
 
 Uses watchdog library for cross-platform file system monitoring.
 Debounces changes to handle multiple rapid writes.
@@ -15,7 +16,9 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Set
+
+from config_loader import resolve_colors_path, resolve_lynx_path
 
 try:
     from watchdog.events import FileSystemEvent, FileSystemEventHandler
@@ -27,18 +30,33 @@ except ImportError:
     FileSystemEvent = None
     logging.warning("watchdog library not available - file watching disabled")
 
+# Watched regardless of configuration — these filenames are not settable.
+FIXED_WATCHED_FILES = ('current_event.json', 'lynx.sch', 'settings.toml')
+
+
+def watched_filenames(config_dir: str) -> Set[str]:
+    """Lower-cased basenames to watch, honouring the configurable data files."""
+    names = {name.lower() for name in FIXED_WATCHED_FILES}
+    names.add(resolve_lynx_path(config_dir).name.lower())
+    names.add(resolve_colors_path(config_dir).name.lower())
+    return names
+
 
 class ConfigFileHandler(FileSystemEventHandler):
     """Handler for config file change events."""
 
-    def __init__(self, reload_callback):
+    def __init__(self, reload_callback, filenames: Optional[Set[str]] = None):
         """Initialize handler.
 
         Args:
             reload_callback: Function to call when reload should be triggered
+            filenames: Lower-cased basenames to watch; defaults to the
+                built-in set plus the default data filenames
         """
         super().__init__()
         self.reload_callback = reload_callback
+        self.filenames = filenames if filenames is not None else {
+            'lynx.evt', 'colors.csv', *(n.lower() for n in FIXED_WATCHED_FILES)}
         self.debounce_timer: Optional[threading.Timer] = None
         self.lock = threading.Lock()
 
@@ -51,9 +69,8 @@ class ConfigFileHandler(FileSystemEventHandler):
         Returns:
             True if file should trigger reload
         """
-        # Monitor these files (case-insensitive on Windows)
-        basename = os.path.basename(file_path).lower()
-        return basename in ['lynx.evt', 'current_event.json', 'colors.csv', 'lynx.sch', 'settings.toml']
+        # Compared case-insensitively so Windows renames still match
+        return os.path.basename(file_path).lower() in self.filenames
 
     def on_modified(self, event: FileSystemEvent):
         """Handle file modification event.
@@ -127,12 +144,14 @@ class ConfigFileHandler(FileSystemEventHandler):
 class PollingFileWatcher:
     """Fallback file watcher using polling (no watchdog dependency)."""
 
-    def __init__(self, config_dir: str, reload_callback):
+    def __init__(self, config_dir: str, reload_callback,
+                 filenames: Optional[Set[str]] = None):
         """Initialize polling watcher.
 
         Args:
             config_dir: Directory to watch
             reload_callback: Function to call when reload should be triggered
+            filenames: Basenames to watch; defaults to the configured data files
         """
         self.config_dir = Path(config_dir)
         self.reload_callback = reload_callback
@@ -141,7 +160,8 @@ class PollingFileWatcher:
 
         # Track modification times
         self.file_mtimes = {}
-        for filename in ['lynx.evt', 'current_event.json', 'colors.csv']:
+        for filename in (filenames if filenames is not None
+                         else watched_filenames(config_dir)):
             file_path = self.config_dir / filename
             if file_path.exists():
                 try:
@@ -200,10 +220,12 @@ def start_file_watcher(config_dir: str, reload_callback, use_polling: bool = Fal
         Observer or PollingFileWatcher instance (with start() called)
         None if watcher could not be started
     """
+    filenames = watched_filenames(config_dir)
+
     if not use_polling and WATCHDOG_AVAILABLE:
         try:
             # Use watchdog for event-driven monitoring
-            event_handler = ConfigFileHandler(reload_callback)
+            event_handler = ConfigFileHandler(reload_callback, filenames)
             observer = Observer()
             observer.schedule(event_handler, config_dir, recursive=False)
             observer.start()
@@ -215,7 +237,7 @@ def start_file_watcher(config_dir: str, reload_callback, use_polling: bool = Fal
 
     # Use polling as fallback
     try:
-        watcher = PollingFileWatcher(config_dir, reload_callback)
+        watcher = PollingFileWatcher(config_dir, reload_callback, filenames)
         watcher.start()
         return watcher
     except Exception as e:

@@ -332,13 +332,37 @@ class TestFileWatching:
             watcher.stop()
 
     @patch('display_event.start_file_watcher')
-    def test_does_not_start_watcher_when_disabled(self, mock_watcher, sample_settings_dict):
-        """Test that file watcher doesn't start when disabled."""
-        sample_settings_dict["monitoring"]["file_watch_enabled"] = False
+    def test_does_not_start_watcher_when_disabled(self, mock_watcher, populated_config_dir,
+                                                  sample_settings_dict,
+                                                  sample_display_event_cfg):
+        """Test that the file watcher doesn't start when the mode disables it."""
+        from display_event import DisplayState, setup_peripherals
 
-        # Initialize display_event
-        # Verify watcher not started
+        sample_display_event_cfg["file_watch_enabled"] = False
+        sample_settings_dict["web"]["web_enabled"] = False
+
+        _, watcher, _ = setup_peripherals(
+            sample_settings_dict, sample_display_event_cfg,
+            str(populated_config_dir), None, DisplayState(), no_web=True)
+
+        assert watcher is None
         mock_watcher.assert_not_called()
+
+    @patch('display_event.start_file_watcher')
+    def test_starts_watcher_when_mode_enables_it(self, mock_watcher, populated_config_dir,
+                                                 sample_settings_dict,
+                                                 sample_display_event_cfg):
+        """Test that the file watcher starts when the mode enables it."""
+        from display_event import DisplayState, setup_peripherals
+
+        sample_display_event_cfg["file_watch_enabled"] = True
+        sample_settings_dict["web"]["web_enabled"] = False
+
+        setup_peripherals(
+            sample_settings_dict, sample_display_event_cfg,
+            str(populated_config_dir), None, DisplayState(), no_web=True)
+
+        mock_watcher.assert_called_once()
 
     def test_reload_callback_refreshes_display(self):
         """Test that reload callback refreshes the display."""
@@ -607,21 +631,6 @@ chain = 2
 parallel = 4
 gpio_slowdown = 3
 
-[display]
-line_height = 24
-header_line_height = 16
-header_rows = 2
-interval = 2.0
-font_shift = 7
-
-[fonts]
-font_path = "fonts"
-font_name = "helvB14.bdf"
-
-[files]
-lynx_file = "lynx.evt"
-colors_file = "colors.csv"
-
 [network]
 fpp_enabled = false
 fpp_host = "127.0.0.1"
@@ -629,20 +638,28 @@ fpp_port = 4048
 colorlight_enabled = false
 colorlight_interface = "eth0"
 
-[keyboard]
-device_path = ""
+[fonts]
+font_path = "fonts"
 
-[behavior]
-once = false
-
-[monitoring]
-file_watch_enabled = true
-poll_interval = 1.0
+[files]
+colors_file = "colors.csv"
 
 [web]
 web_enabled = false
 web_host = "0.0.0.0"
 web_port = 5000
+
+[mode.display_event]
+line_height = 24
+header_line_height = 16
+header_rows = 2
+interval = 2.0
+font_shift = 7
+font_name = "helvB14.bdf"
+lynx_file = "lynx.evt"
+once = false
+keyboard_device = ""
+file_watch_enabled = true
 """
         (config_dir / "settings.toml").write_text(settings_toml)
         return str(config_dir)
@@ -665,8 +682,8 @@ web_port = 5000
             config_dir=config_dir,
             events={(1, 1, 1): {"name": "Old", "athletes": []}},
             affiliation_colors={},
-            disp={"font_shift": 7, "line_height": 24, "header_line_height": 16,
-                  "header_rows": 2, "interval": 2.0},
+            mode_cfg={"font_shift": 7, "line_height": 24, "header_line_height": 16,
+                      "header_rows": 2, "interval": 2.0, "font_name": "helvB14.bdf"},
             schedule=[],
             args_file=evt_path,
             args_font="fonts/helvB14.bdf",
@@ -694,8 +711,8 @@ web_port = 5000
             config_dir=config_dir,
             events={(1, 1, 1): {"name": "Old", "athletes": []}},
             affiliation_colors={},
-            disp={"font_shift": 7, "line_height": 24, "header_line_height": 16,
-                  "header_rows": 2, "interval": 2.0},
+            mode_cfg={"font_shift": 7, "line_height": 24, "header_line_height": 16,
+                      "header_rows": 2, "interval": 2.0, "font_name": "helvB14.bdf"},
             schedule=[],
             args_file=evt_path,
             args_font="fonts/helvB14.bdf",
@@ -723,8 +740,8 @@ web_port = 5000
             config_dir=config_dir,
             events={(7, 1, 1): {"name": "Current", "athletes": []}},
             affiliation_colors={},
-            disp={"font_shift": 7, "line_height": 24, "header_line_height": 16,
-                  "header_rows": 2, "interval": 2.0},
+            mode_cfg={"font_shift": 7, "line_height": 24, "header_line_height": 16,
+                      "header_rows": 2, "interval": 2.0, "font_name": "helvB14.bdf"},
             schedule=[],
             args_file=evt_path,
             args_font="fonts/helvB14.bdf",
@@ -752,8 +769,8 @@ web_port = 5000
             config_dir=config_dir,
             events={(1, 1, 1): {"name": "Old", "athletes": []}},
             affiliation_colors={},
-            disp={"font_shift": 7, "line_height": 24, "header_line_height": 16,
-                  "header_rows": 2, "interval": 2.0},
+            mode_cfg={"font_shift": 7, "line_height": 24, "header_line_height": 16,
+                      "header_rows": 2, "interval": 2.0, "font_name": "helvB14.bdf"},
             schedule=[],
             args_file=evt_path,
             args_font="fonts/helvB14.bdf",
@@ -814,18 +831,18 @@ class TestErrorHandling:
 class TestBehaviorModes:
     """Tests for different behavior modes."""
 
-    def test_once_mode_renders_and_exits(self, sample_settings_dict):
+    def test_once_mode_renders_and_exits(self, sample_display_event_cfg):
         """Test that once mode renders once and exits."""
-        sample_settings_dict["behavior"]["once"] = True
+        sample_display_event_cfg["once"] = True
 
         # Initialize display_event
         # Verify renders once
         # Verify exits
         pass
 
-    def test_continuous_mode_loops(self, sample_settings_dict):
+    def test_continuous_mode_loops(self, sample_display_event_cfg):
         """Test that continuous mode loops indefinitely."""
-        sample_settings_dict["behavior"]["once"] = False
+        sample_display_event_cfg["once"] = False
 
         # Initialize display_event
         # Verify enters loop

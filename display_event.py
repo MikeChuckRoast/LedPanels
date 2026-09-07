@@ -33,7 +33,8 @@ from typing import Dict, List, Optional, Tuple
 
 # Import from local modules
 from config_loader import (ConfigError, ensure_config_directory,
-                           load_current_event, load_settings)
+                           load_current_event, load_mode_config, load_settings,
+                           resolve_colors_path)
 from display_utils import (calculate_text_baseline, draw_centered_text,
                            fill_rectangle, load_font_metadata,
                            load_font_with_fallback, measure_text_width,
@@ -712,7 +713,7 @@ def load_file_with_retry(load_func, file_description: str, max_retries: int = 3)
     return None
 
 
-def handle_file_reload(config_dir, events, affiliation_colors, disp, schedule,
+def handle_file_reload(config_dir, events, affiliation_colors, mode_cfg, schedule,
                        args_file, args_font, args_colors_csv,
                        displayed_event, displayed_round, displayed_heat,
                        current_schedule_index, starting_schedule_index,
@@ -723,7 +724,7 @@ def handle_file_reload(config_dir, events, affiliation_colors, disp, schedule,
         config_dir: Path to config directory
         events: Current events dict
         affiliation_colors: Current color mappings
-        disp: Current display settings dict
+        mode_cfg: Current [mode.display_event] settings dict
         schedule: Current schedule list
         args_file: Path to lynx.evt file
         args_font: Current font path
@@ -738,7 +739,7 @@ def handle_file_reload(config_dir, events, affiliation_colors, disp, schedule,
         original_heat: Reference heat number (keyboard floor)
 
     Returns:
-        Dict with updated state keys: events, affiliation_colors, disp, font,
+        Dict with updated state keys: events, affiliation_colors, mode_cfg, font,
         event, round, heat, schedule, starting_schedule_index,
         current_schedule_index, original_event, original_round, original_heat
     """
@@ -799,9 +800,9 @@ def handle_file_reload(config_dir, events, affiliation_colors, disp, schedule,
     )
     font = args_font
     if new_settings is not None:
-        disp = new_settings['display']
-        new_fonts = new_settings['fonts']
-        new_font_path = os.path.join(new_fonts['font_path'], new_fonts['font_name'])
+        mode_cfg = load_mode_config(config_dir, 'display_event')
+        new_font_path = os.path.join(new_settings['fonts']['font_path'],
+                                     mode_cfg['font_name'])
         if new_font_path != args_font:
             font = new_font_path
             logging.info("Font updated: %s", font)
@@ -896,7 +897,7 @@ def handle_file_reload(config_dir, events, affiliation_colors, disp, schedule,
     return {
         'events': events,
         'affiliation_colors': affiliation_colors,
-        'disp': disp,
+        'mode_cfg': mode_cfg,
         'font': font,
         'event': result_event,
         'round': result_round,
@@ -991,11 +992,12 @@ def handle_heat_change(request, schedule, current_schedule_index, starting_sched
     return current_event, current_round, current_heat, current_schedule_index
 
 
-def setup_peripherals(settings, config_dir, args_keyboard_device, state, no_web=False):
+def setup_peripherals(settings, mode_cfg, config_dir, args_keyboard_device, state, no_web=False):
     """Start background services: web server, file watcher, network monitor, keyboard listener.
 
     Args:
-        settings: Full settings dict
+        settings: Global settings dict
+        mode_cfg: [mode.display_event] settings dict
         config_dir: Path to config directory
         args_keyboard_device: Keyboard device path from CLI args (or None)
         state: DisplayState instance
@@ -1018,11 +1020,15 @@ def setup_peripherals(settings, config_dir, args_keyboard_device, state, no_web=
             logging.warning("Web server could not be started")
 
     # Start file watcher
-    file_watcher = start_file_watcher(config_dir, state.request_file_reload)
-    if file_watcher:
-        logging.info("File monitoring enabled for auto-reload")
+    file_watcher = None
+    if mode_cfg.get('file_watch_enabled', True):
+        file_watcher = start_file_watcher(config_dir, state.request_file_reload)
+        if file_watcher:
+            logging.info("File monitoring enabled for auto-reload")
+        else:
+            logging.warning("File monitoring could not be started - manual restart required for file changes")
     else:
-        logging.warning("File monitoring could not be started - manual restart required for file changes")
+        logging.info("File monitoring disabled by [mode.display_event].file_watch_enabled")
 
     # Start network monitor thread
     network_thread = threading.Thread(target=network_monitor_loop, args=(state,), daemon=True)
@@ -1072,19 +1078,15 @@ def main():
         logging.error("Configuration error: %s", e)
         sys.exit(1)
 
-    # Extract settings for easier access
+    # Global settings, then this mode's own section
     hw = settings['hardware']
-    disp = settings['display']
     fonts = settings['fonts']
-    files = settings['files']
     net = settings['network']
-    kbd = settings['keyboard']
-    behavior = settings['behavior']
+    mode_cfg = load_mode_config(config_dir, 'display_event')
 
     # Resolve file paths relative to config directory
-    config_path = Path(config_dir)
-    lynx_file_path = str(config_path / files['lynx_file'])
-    colors_file_path = str(config_path / files['colors_file'])
+    lynx_file_path = str(Path(config_dir) / mode_cfg['lynx_file'])
+    colors_file_path = str(resolve_colors_path(config_dir))
 
     # Now parse all arguments with defaults from config
     parser = argparse.ArgumentParser(description="Display an event from lynx.evt on LED matrix")
@@ -1094,16 +1096,16 @@ def main():
     parser.add_argument('--event', type=int, default=current_event['event'], help='Event number')
     parser.add_argument('--round', type=int, default=current_event['round'], help='Round number')
     parser.add_argument('--heat', type=int, default=current_event['heat'], help='Heat number')
-    # Combine font_path and font_name for the full font path
-    default_font_full_path = os.path.join(fonts['font_path'], fonts['font_name'])
+    # Combine the global font directory with this mode's font filename
+    default_font_full_path = os.path.join(fonts['font_path'], mode_cfg['font_name'])
     parser.add_argument('--font', default=default_font_full_path, help='Path to BDF font for rgbmatrix')
     parser.add_argument('--width', type=int, default=hw['width'], help='Display width in pixels')
     parser.add_argument('--height', type=int, default=hw['height'], help='Display height in pixels')
-    parser.add_argument('--line-height', type=int, default=disp['line_height'], help='Pixels per text line for athlete rows')
-    parser.add_argument('--header-line-height', type=int, default=disp['header_line_height'], help='Pixels per text line for header rows')
-    parser.add_argument('--header-rows', type=int, default=disp['header_rows'], help='Number of rows for header (allows text wrapping)')
-    parser.add_argument('--interval', type=float, default=disp['interval'], help='Seconds per page when paging')
-    parser.add_argument('--once', action='store_true', default=behavior['once'], help='Render once then exit')
+    parser.add_argument('--line-height', type=int, default=mode_cfg['line_height'], help='Pixels per text line for athlete rows')
+    parser.add_argument('--header-line-height', type=int, default=mode_cfg['header_line_height'], help='Pixels per text line for header rows')
+    parser.add_argument('--header-rows', type=int, default=mode_cfg['header_rows'], help='Number of rows for header (allows text wrapping)')
+    parser.add_argument('--interval', type=float, default=mode_cfg['interval'], help='Seconds per page when paging')
+    parser.add_argument('--once', action='store_true', default=mode_cfg['once'], help='Render once then exit')
     parser.add_argument('--chain', type=int, default=hw['chain'], help='Panels chained horizontally')
     parser.add_argument('--parallel', type=int, default=hw['parallel'], help='Panels stacked vertically')
     parser.add_argument('--gpio-slowdown', type=int, default=hw['gpio_slowdown'], help='GPIO slowdown for RGBMatrixOptions')
@@ -1112,7 +1114,7 @@ def main():
     parser.add_argument('--fpp-port', type=int, default=net['fpp_port'], help='FPP DDP port')
     parser.add_argument('--colorlight', action='store_true', default=net['colorlight_enabled'], help='Send frames directly to ColorLight 5A-75B via raw Ethernet (requires root/sudo)')
     parser.add_argument('--colorlight-interface', default=net['colorlight_interface'], help='Network interface name for ColorLight (e.g., eth0, enp0s3)')
-    parser.add_argument('--keyboard-device', default=kbd['device_path'] or None, help='Path to keyboard input device for evdev (e.g., /dev/input/event2). Auto-detect if not specified.')
+    parser.add_argument('--keyboard-device', default=mode_cfg['keyboard_device'] or None, help='Path to keyboard input device for evdev (e.g., /dev/input/event2). Auto-detect if not specified.')
     parser.add_argument('--no-web', action='store_true', default=False,
                         help='Disable internal web server (used when run under display_manager)')
     args = parser.parse_args()
@@ -1131,7 +1133,7 @@ def main():
 
     # Start peripheral services
     web_server, file_watcher, keyboard_listener = setup_peripherals(
-        settings, config_dir, args.keyboard_device, state, no_web=args.no_web)
+        settings, mode_cfg, config_dir, args.keyboard_device, state, no_web=args.no_web)
 
     # Load schedule file if available
     schedule_path = os.path.join(config_dir, "lynx.sch")
@@ -1219,7 +1221,7 @@ def main():
             # Draw the event
             should_continue = draw_event_on_matrix(event, matrix, canvas, graphics, args.font,
                                  line_height=args.line_height, header_line_height=args.header_line_height,
-                                 interval=args.interval, once=args.once, font_shift=disp['font_shift'],
+                                 interval=args.interval, once=args.once, font_shift=mode_cfg['font_shift'],
                                  state=state,
                                  affiliation_colors=affiliation_colors, header_rows=args.header_rows)
 
@@ -1231,14 +1233,14 @@ def main():
 
             if is_file_reload:
                 result = handle_file_reload(
-                    config_dir, events, affiliation_colors, disp, schedule,
+                    config_dir, events, affiliation_colors, mode_cfg, schedule,
                     args.file, args.font, args.colors_csv,
                     args.event, args.round, current_heat,
                     current_schedule_index, starting_schedule_index,
                     original_event, original_round, original_heat)
                 events = result['events']
                 affiliation_colors = result['affiliation_colors']
-                disp = result['disp']
+                mode_cfg = result['mode_cfg']
                 args.font = result['font']
                 args.event = result['event']
                 args.round = result['round']

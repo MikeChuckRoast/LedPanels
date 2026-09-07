@@ -270,8 +270,8 @@ writing a preview PNG instead of lighting the panel.
    fpp_enabled = false
    ```
 
-   The `gpio_slowdown` keys under `[hardware]` and `[scoreboard]` are already
-   carried in the config templates and are read only by this backend.
+   The `gpio_slowdown` key under `[hardware]` is already carried in the config
+   templates and is read only by this backend.
 
 4. Optionally restore the dependency note in `requirements-pi.txt`, remembering
    that the install is the `make install-python` above, not a pip line.

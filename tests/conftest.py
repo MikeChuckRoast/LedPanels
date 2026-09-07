@@ -20,7 +20,7 @@ def temp_config_dir(tmp_path):
 
 @pytest.fixture
 def sample_settings_dict() -> Dict[str, Any]:
-    """Return a sample settings dictionary for testing."""
+    """Return a sample global settings dictionary (what load_settings returns)."""
     return {
         "hardware": {
             "width": 64,
@@ -29,21 +29,6 @@ def sample_settings_dict() -> Dict[str, Any]:
             "parallel": 4,
             "gpio_slowdown": 3
         },
-        "display": {
-            "line_height": 24,
-            "header_line_height": 16,
-            "header_rows": 2,
-            "interval": 2.0,
-            "font_shift": 7
-        },
-        "fonts": {
-            "font_path": "/path/to/fonts",
-            "font_name": "helvB12.bdf"
-        },
-        "files": {
-            "lynx_file": "lynx.evt",
-            "colors_file": "colors.csv"
-        },
         "network": {
             "fpp_enabled": False,
             "fpp_host": "127.0.0.1",
@@ -51,21 +36,34 @@ def sample_settings_dict() -> Dict[str, Any]:
             "colorlight_enabled": False,
             "colorlight_interface": "eth0"
         },
-        "keyboard": {
-            "device_path": ""
+        "fonts": {
+            "font_path": "/path/to/fonts"
         },
-        "behavior": {
-            "once": False
-        },
-        "monitoring": {
-            "file_watch_enabled": True,
-            "poll_interval": 1.0
+        "files": {
+            "colors_file": "colors.csv"
         },
         "web": {
             "web_enabled": True,
             "web_host": "0.0.0.0",
             "web_port": 5000
         }
+    }
+
+
+@pytest.fixture
+def sample_display_event_cfg() -> Dict[str, Any]:
+    """Return a sample [mode.display_event] section (what load_mode_config returns)."""
+    return {
+        "line_height": 24,
+        "header_line_height": 16,
+        "header_rows": 2,
+        "interval": 2.0,
+        "font_shift": 7,
+        "font_name": "helvB12.bdf",
+        "lynx_file": "lynx.evt",
+        "once": False,
+        "keyboard_device": "",
+        "file_watch_enabled": True,
     }
 
 

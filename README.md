@@ -114,7 +114,6 @@ Set `font_path` under `[fonts]` to an absolute path:
 ```toml
 [fonts]
 font_path = "C:/Users/mike/Documents/Code Projects/LED Panels/fonts"
-font_name = "helvB14.bdf"
 ```
 
 ### Raspberry Pi (production)
@@ -256,8 +255,11 @@ Set `name` and `uuid` under `[mode.athletic_live_scoreboard]` in `settings.toml`
 (or in the web UI) so the manager can launch it. Without them the manager logs a
 config error and the mode will not start.
 
-Note that this mode's panel geometry comes from `[hardware]`, which the manager
-mirrors onto the command line — it does not read `settings.toml` itself.
+Like every other mode it reads `settings.toml` itself — `[hardware]` for panel
+geometry, `[network]` for the output backend, `[fonts].font_path` plus its own
+`font_name` for the font, and `[files].colors_file` for team colors. Running it
+directly with `--config-dir ./config` therefore targets the same panel the
+manager would.
 
 ### udp_scoreboard — event clock
 
@@ -277,11 +279,14 @@ Message format:
 {"timeRunning": "42.1"}                           // update running time
 ```
 
-This mode reads its own geometry and fonts from the `[scoreboard]` section
-rather than `[hardware]`, so it can use a different panel arrangement than the
-other two. Anything in that section can be overridden on the command line
-(`--port`, `--top-font`, `--bottom-font`, `--top-font-shift-vertical`,
+Panel geometry comes from `[hardware]` like every other mode; the band heights,
+fonts and font offsets are its own and live in `[mode.udp_scoreboard]`. Anything
+there can be overridden on the command line (`--port`, `--top-height`,
+`--top-font`, `--bottom-font`, `--top-font-shift-vertical`,
 `--bottom-font-shift-horizontal`, and so on — see `--help`).
+
+`bottom_height = 0` means "the rest of the panel below `top_height`", so the
+default adapts to any panel height.
 
 Send test traffic with `python tools/test_scoreboard.py --port 5568`.
 
@@ -357,20 +362,30 @@ CLI arguments override file values, which override built-in defaults.
 
 ### settings.toml sections
 
+The file is split in two. **Global** sections describe the box itself and apply
+to whichever mode is running; anything only one mode reads lives under
+`[mode.<name>]`. The two halves are loaded and validated independently, so one
+mode's broken section can never stop a different mode from starting.
+
+**Global**
+
 | Section | Purpose |
 |---|---|
-| `[hardware]` | Panel geometry for `display_event` and `athletic_live_scoreboard` |
-| `[display]` | Row heights, header rows, page interval, font shift |
-| `[fonts]` | Absolute path to the BDF font directory, plus default font name |
-| `[files]` | `lynx_file` and `colors_file`, relative to the config directory |
+| `[hardware]` | Panel geometry — the only copy; every mode renders to it |
 | `[network]` | Backend selection — see [docs/BACKENDS.md](docs/BACKENDS.md) |
-| `[keyboard]` | Input device path; empty means auto-detect |
-| `[behavior]` | `once` mode |
-| `[monitoring]` | File watching and poll interval |
+| `[fonts]` | Absolute path to the BDF font directory; modes name a bare filename inside it |
+| `[files]` | `colors_file`, relative to the config directory |
 | `[web]` | Web UI enable, host, port |
-| `[scoreboard]` | Everything `udp_scoreboard` needs — its own geometry and fonts |
 | `[manager]` | `active_mode`, `auto_restart`, `restart_backoff_sec` |
-| `[mode.*]` | Per-mode settings; only `athletic_live_scoreboard` and `animation_display` have any |
+
+**Per-mode**
+
+| Section | Purpose |
+|---|---|
+| `[mode.display_event]` | Row heights, header rows, page interval, font shift, `font_name`, `lynx_file`, `once`, `keyboard_device`, `file_watch_enabled` |
+| `[mode.athletic_live_scoreboard]` | `name`, `uuid`, `poll_interval`, `font_name` |
+| `[mode.udp_scoreboard]` | `udp_port`, `buffer_size`, band heights, fonts and font offsets |
+| `[mode.animation_display]` | `file`, `fit`, `fps`, `loop`, `background`, `max_frames`, `ffmpeg` |
 
 ```toml
 [hardware]
@@ -380,16 +395,11 @@ chain = 2           # panels chained horizontally
 parallel = 4        # panels stacked vertically
 gpio_slowdown = 3   # 0–4; raise if the display is glitchy
 
-[display]
-line_height = 24
-header_line_height = 16
-header_rows = 2
-interval = 2.0
-font_shift = 0
-
 [fonts]
 font_path = "/home/mike/LedPanels/fonts"
-font_name = "helvB14.bdf"
+
+[files]
+colors_file = "colors.csv"
 
 [web]
 web_enabled = true
@@ -401,11 +411,23 @@ active_mode = "athletic_live_scoreboard"
 auto_restart = true
 restart_backoff_sec = 5
 
+[mode.display_event]
+line_height = 24
+header_line_height = 16
+header_rows = 2
+interval = 2.0
+font_shift = 0
+font_name = "helvB14.bdf"     # bare filename inside [fonts].font_path
+lynx_file = "lynx.evt"
+once = false
+keyboard_device = ""          # empty = auto-detect
+file_watch_enabled = true
+
 [mode.athletic_live_scoreboard]
 name = "FUSHIABOX"
 uuid = "dc4113ed-50f3-424d-ae9c-02f0745d7285"
-interval = 10
-font = "fonts/helvB14.bdf"
+poll_interval = 10.0
+font_name = "helvB14.bdf"
 
 [mode.animation_display]
 file = "logo.gif"     # resolved inside config/animations/
@@ -458,7 +480,7 @@ Gitignored: `settings.toml` (local paths), `current_event.json` (runtime state),
 | `Settings file not found` | Copy an example file into place, or let the first run create defaults. |
 | `Invalid TOML` | Quote strings, leave numbers bare, comment with `#` not `//`. |
 | `Font file not found` | `font_path` must be an absolute path to the directory holding the `.bdf` files. |
-| `Lynx event file not found` | Put `lynx.evt` in the config directory, or point `[files].lynx_file` at it. |
+| `Lynx event file not found` | Put `lynx.evt` in the config directory, or point `[mode.display_event].lynx_file` at it. |
 | `requires 'name' and 'uuid'` | Fill in `[mode.athletic_live_scoreboard]` before selecting that mode. |
 | `requires 'file'` | Upload a clip and select it before switching to Animation. |
 | `needs ffmpeg, which was not found` | `sudo apt install ffmpeg`, or use a GIF instead. |
@@ -490,12 +512,11 @@ UI hides that section.
 | GET/POST | `/api/current_event` | Get or set event/round/heat |
 | GET/POST | `/api/teams` | Get or update team colours |
 | POST | `/api/teams/add_missing` | Append teams found in `lynx.evt` but absent from `colors.csv` |
-| GET/POST | `/api/display_settings` | Get or update the `[display]` section |
 | GET/POST | `/api/display_power` | Read or set display power (see below) |
 | GET | `/api/display_modes` | Available modes and their labels |
 | GET/POST | `/api/active_mode` | Read or switch the active mode |
 | GET | `/api/mode_status` | Child process state — running, pid, exit code |
-| GET/POST | `/api/mode_settings/<mode>` | Read or update a `[mode.*]` section |
+| GET/POST | `/api/mode_settings/<mode>` | Read or update a `[mode.*]` section (works with or without the manager) |
 | POST | `/api/upload/events` | Upload a new `lynx.evt` |
 | POST | `/api/upload/schedule` | Upload a new `lynx.sch` |
 | POST | `/api/upload/combined` | Upload both together (preferred — keeps them consistent) |
@@ -579,7 +600,7 @@ Everything in `tools/` is run from the project root.
 | `tools/test_udp.py` | Generic UDP listener; prints whatever arrives. |
 | `tools/test_watcher.py` | Exercise the file watcher and log each reload it triggers. |
 | `tools/test_colorlight_frames.py` | Send known frame patterns to a ColorLight card to debug ordering and timing. |
-| `tools/test_keyboard.py` | List `/dev/input/` devices and print key presses; use it to find `[keyboard].device_path`. |
+| `tools/test_keyboard.py` | List `/dev/input/` devices and print key presses; use it to find `[mode.display_event].keyboard_device`. |
 
 On the Pi these run through the virtual environment, so use `.venv/bin/python`
 rather than `python`:

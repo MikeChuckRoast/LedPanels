@@ -174,13 +174,14 @@ def fill_rectangle(canvas, graphics, x0: int, y0: int, x1: int, y1: int, color):
 
 
 def draw_centered_text(canvas, graphics, font, font_metadata: dict, y0: int, line_height: int,
-                       canvas_width: int, text: str, color, font_shift: int):
+                       canvas_width: int, text: str, color, font_shift: int,
+                       x_shift: int = 0):
     """Draw horizontally centered text at specified Y position.
 
     Note this function may not work properly on Window using RGBMatrixEmulator as it draws
     text starting at at the font bounding box X offset, which skews centering calculations.
     The Linux rgbmatrix library does not have this issue. Best workaround is to edit the BDF
-    font to set the FBBXOFF property to zero.
+    font to set the FBBXOFF property to zero; failing that, x_shift can correct it.
 
     Args:
         canvas: Canvas object to draw on
@@ -193,8 +194,11 @@ def draw_centered_text(canvas, graphics, font, font_metadata: dict, y0: int, lin
         text: Text to draw
         color: Color object from graphics.Color()
         font_shift: Vertical adjustment for font positioning
+        x_shift: Horizontal adjustment applied after centering; deliberately not
+            clamped, so a negative value can pull text back left to offset a
+            font whose glyphs sit right of the origin
     """
     text_width = measure_text_width(font, text)
-    x_pos = max(0, (canvas_width - text_width) // 2)
+    x_pos = max(0, (canvas_width - text_width) // 2) + x_shift
     y_baseline = calculate_text_baseline(y0, line_height, font_metadata, font_shift)
     graphics.DrawText(canvas, font, x_pos, y_baseline, color, text)
