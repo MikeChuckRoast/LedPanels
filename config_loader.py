@@ -152,6 +152,7 @@ font_name = "helvB14.bdf"       # Bare filename inside [fonts].font_path
 udp_port = 5568                 # UDP port to listen on
 buffer_size = 4096              # Maximum UDP packet size
 top_height = 24                 # Height of the event-name band in pixels
+top_color = "#008500"           # Hex fill for the event-name band background
 bottom_height = 0               # Height of the time band; 0 = rest of the panel
 top_font_name = "helvB18.bdf"            # Bare filename inside [fonts].font_path
 bottom_font_name = "Roboto-Black-50.bdf" # Bare filename inside [fonts].font_path
@@ -438,6 +439,7 @@ _MODE_DEFAULTS: Dict[str, Dict] = {
         "top_font_shift_horizontal": 0,
         "bottom_font_shift_vertical": 0,
         "bottom_font_shift_horizontal": 0,
+        "top_color": "#008500",
     },
     "animation_display": {
         "file": "",
@@ -483,6 +485,7 @@ _MODE_SCHEMA: Dict[str, Dict[str, str]] = {
         "top_font_shift_horizontal": "int",
         "bottom_font_shift_vertical": "int",
         "bottom_font_shift_horizontal": "int",
+        "top_color": "str",
     },
     "animation_display": {
         "file": "str",

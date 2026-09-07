@@ -30,6 +30,7 @@ from display_utils import (calculate_text_baseline, draw_centered_text,
                            fill_rectangle, load_font_metadata,
                            load_font_with_fallback, measure_text_width,
                            truncate_text_to_width)
+from event_parser import parse_hex_color
 from matrix_backend import get_matrix_backend
 
 
@@ -106,7 +107,8 @@ def render_scoreboard(canvas, graphics, top_font, bottom_font,
                      canvas_width: int, canvas_height: int,
                      top_font_shift_v: int, top_font_shift_h: int,
                      bottom_font_shift_v: int, bottom_font_shift_h: int,
-                     top_height: int = 24, bottom_height: int = 0):
+                     top_height: int = 24, bottom_height: int = 0,
+                     top_color: tuple = (255, 0, 0)):
     """Render scoreboard display with event name and time.
 
     Args:
@@ -127,6 +129,7 @@ def render_scoreboard(canvas, graphics, top_font, bottom_font,
         top_height: Height of the event-name band in pixels
         bottom_height: Height of the box the time is centred in; 0 means the
             rest of the panel below top_height
+        top_color: RGB tuple for the event-name band background
     """
     canvas.Clear()
 
@@ -138,12 +141,12 @@ def render_scoreboard(canvas, graphics, top_font, bottom_font,
         bottom_height = canvas_height - top_height
 
     # Colors
-    red = graphics.Color(255, 0, 0)
+    top_bg = graphics.Color(*top_color)
     white = graphics.Color(255, 255, 255)
     black = graphics.Color(0, 0, 0)
 
-    # Draw top section (event name) - red background, white text
-    fill_rectangle(canvas, graphics, 0, 0, canvas_width - 1, top_height - 1, red)
+    # Draw top section (event name) - configurable background, white text
+    fill_rectangle(canvas, graphics, 0, 0, canvas_width - 1, top_height - 1, top_bg)
 
     if event_name:
         # Truncate event name to fit display width (with 2px margin on each side)
@@ -276,8 +279,17 @@ def main():
     parser.add_argument('--bottom-font-shift-horizontal', type=int,
                        default=mode_cfg.get('bottom_font_shift_horizontal', 0),
                        help='Horizontal font adjustment for bottom section')
+    parser.add_argument('--top-color',
+                       default=mode_cfg.get('top_color', '#008500'),
+                       help='Hex background color for the event-name section (default: #008500)')
 
     args = parser.parse_args()
+
+    try:
+        top_color = parse_hex_color(args.top_color)
+    except ValueError as exc:
+        logging.error("Invalid --top-color: %s", exc)
+        sys.exit(1)
 
     # Get matrix backend
     matrix_classes = get_matrix_backend(
@@ -336,7 +348,7 @@ def main():
                          canvas.width, canvas.height,
                          args.top_font_shift_vertical, args.top_font_shift_horizontal,
                          args.bottom_font_shift_vertical, args.bottom_font_shift_horizontal,
-                         args.top_height, args.bottom_height)
+                         args.top_height, args.bottom_height, top_color)
         canvas = matrix.SwapOnVSync(canvas)
 
         # Main loop
@@ -371,7 +383,7 @@ def main():
                              canvas.width, canvas.height,
                              args.top_font_shift_vertical, args.top_font_shift_horizontal,
                              args.bottom_font_shift_vertical, args.bottom_font_shift_horizontal,
-                             args.top_height, args.bottom_height)
+                             args.top_height, args.bottom_height, top_color)
             canvas = matrix.SwapOnVSync(canvas)
 
     except KeyboardInterrupt:
