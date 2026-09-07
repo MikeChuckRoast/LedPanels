@@ -79,7 +79,6 @@ For **development** on Windows or macOS:
 pip install -r requirements.txt
 
 cp config/settings.toml.example config/settings.toml
-# edit [fonts].font_path to the absolute path of this repo's fonts/ directory
 
 python display_manager.py --config-dir ./config
 ```
@@ -109,7 +108,9 @@ copy config\settings.toml.example config\settings.toml
 copy config\current_event.json.example config\current_event.json
 ```
 
-Set `font_path` under `[fonts]` to an absolute path:
+`font_path` under `[fonts]` defaults to `"fonts"`, which resolves against this
+repo's own checkout no matter where it's cloned, so no edit is needed unless
+your fonts live elsewhere — in which case, point it at an absolute path:
 
 ```toml
 [fonts]
@@ -131,9 +132,9 @@ That script is idempotent — safe to re-run — and it:
 - creates `.venv/` with `--system-site-packages`, so apt-installed modules such
   as `python3-evdev` remain visible and pip fetches only what Debian lacks
 - installs [`requirements-pi.txt`](requirements-pi.txt)
-- seeds `config/settings.toml` from `settings.toml.pi` and
-  `config/current_event.json` from its example, never overwriting existing files
-- rewrites `[fonts].font_path` to this checkout's actual `fonts/` directory
+- seeds `config/settings.toml` from `settings.toml.pi` (its `font_path` already
+  resolves against this checkout, wherever it lives) and `config/current_event.json`
+  from its example, never overwriting existing files
 - with `--install-service`, installs and enables the systemd unit, rewriting its
   hardcoded paths to match wherever the repo lives
 - reports whether the two optional extras are present: `python3-evdev` for
@@ -373,7 +374,7 @@ mode's broken section can never stop a different mode from starting.
 |---|---|
 | `[hardware]` | Panel geometry — the only copy; every mode renders to it |
 | `[network]` | Backend selection — see [docs/BACKENDS.md](docs/BACKENDS.md) |
-| `[fonts]` | Absolute path to the BDF font directory; modes name a bare filename inside it |
+| `[fonts]` | Path to the BDF font directory (relative paths resolve against the repo checkout); modes name a bare filename inside it |
 | `[files]` | `colors_file`, relative to the config directory |
 | `[web]` | Web UI enable, host, port |
 | `[manager]` | `active_mode`, `auto_restart`, `restart_backoff_sec` |
@@ -396,7 +397,7 @@ parallel = 4        # panels stacked vertically
 gpio_slowdown = 3   # 0–4; raise if the display is glitchy
 
 [fonts]
-font_path = "/home/mike/LedPanels/fonts"
+font_path = "fonts"
 
 [files]
 colors_file = "colors.csv"
@@ -479,7 +480,7 @@ Gitignored: `settings.toml` (local paths), `current_event.json` (runtime state),
 |---|---|
 | `Settings file not found` | Copy an example file into place, or let the first run create defaults. |
 | `Invalid TOML` | Quote strings, leave numbers bare, comment with `#` not `//`. |
-| `Font file not found` | `font_path` must be an absolute path to the directory holding the `.bdf` files. |
+| `Font file not found` | `font_path` must point at the directory holding the `.bdf` files — a relative path resolves against the repo checkout, or use an absolute path. |
 | `Lynx event file not found` | Put `lynx.evt` in the config directory, or point `[mode.display_event].lynx_file` at it. |
 | `requires 'name' and 'uuid'` | Fill in `[mode.athletic_live_scoreboard]` before selecting that mode. |
 | `requires 'file'` | Upload a clip and select it before switching to Animation. |

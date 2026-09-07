@@ -114,13 +114,13 @@ if [ "$UPDATE_ONLY" -eq 0 ]; then
 
     if [ -f "$CONFIG_DIR/settings.toml" ]; then
         info "settings.toml exists, leaving it alone"
-        grep -q "^font_path = \"$REPO_ROOT/fonts\"" "$CONFIG_DIR/settings.toml" \
-            || warn "[fonts].font_path does not point at $REPO_ROOT/fonts — check it by hand"
+        grep -qE "^font_path = \"($REPO_ROOT/fonts|fonts)\"" "$CONFIG_DIR/settings.toml" \
+            || warn "[fonts].font_path does not point at the repo's fonts/ directory — check it by hand"
     else
+        # The template's font_path ("fonts") already resolves against this
+        # checkout wherever it lives, so it needs no rewriting.
         cp "$CONFIG_DIR/settings.toml.pi" "$CONFIG_DIR/settings.toml"
-        # The template hardcodes /home/mike/LedPanels; point it at the real checkout.
-        sed -i "s|^font_path = .*|font_path = \"$REPO_ROOT/fonts\"|" "$CONFIG_DIR/settings.toml"
-        info "created settings.toml from settings.toml.pi (font_path -> $REPO_ROOT/fonts)"
+        info "created settings.toml from settings.toml.pi"
     fi
 
     if [ -f "$CONFIG_DIR/current_event.json" ]; then

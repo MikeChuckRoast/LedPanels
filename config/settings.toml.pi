@@ -34,10 +34,13 @@ colorlight_interface = "eth0"  # Network interface name (e.g., eth0, enp0s3, wla
 colorlight_row_delay_ms = 1.0
 
 [fonts]
-# Absolute path to the directory holding the BDF fonts. Every mode names a
-# bare filename inside it, so this is the only place a path appears.
+# Path to the directory holding the BDF fonts. Every mode names a bare
+# filename inside it, so this is the only place a path appears. A relative
+# path (e.g. "fonts") resolves against this repo's checkout, wherever it
+# lives, so that's the default — an absolute path also works if you keep
+# fonts elsewhere.
 # Bundled fonts: helvB14.bdf, helvB18.bdf, helvB24.bdf, Roboto-Black-50.bdf
-font_path = "/home/mike/LedPanels/fonts"
+font_path = "fonts"
 
 [files]
 # Team color mappings (affiliation,name,bgcolor,text), relative to this config
